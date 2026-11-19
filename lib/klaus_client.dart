@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/io.dart';
 
 import 'audio.dart';
@@ -25,7 +26,8 @@ class KlausClient extends ChangeNotifier {
   String emotion = 'neutral';
   String? activationCode;
   String? errorText;
-  bool autoMode = false;
+  /// Conversa contínua (mãos livres). Ligada por defeito e lembrada entre aberturas.
+  bool autoMode = true;
   final List<ChatLine> chat = [];
 
   DeviceIdentity? identity;
@@ -42,9 +44,19 @@ class KlausClient extends ChangeNotifier {
   double get micLevel => mic.level;
   double get speakerLevel => speaker.level;
 
+  Timer? _watchdog;
+
   void _set(KlausState s, String msg) {
     state = s;
     status = msg;
+    _watchdog?.cancel();
+    if (s == KlausState.thinking && autoMode) {
+      _watchdog = Timer(const Duration(seconds: 20), () {
+        if (!_disposed && autoMode && state == KlausState.thinking) {
+          _startListening(auto: true);
+        }
+      });
+    }
     if (!_disposed) notifyListeners();
   }
 
@@ -188,9 +200,14 @@ class KlausClient extends ChangeNotifier {
       _scheduleReconnect();
       return;
     }
-    _set(KlausState.idle, 'Pronto! Toque para falar');
     emotion = 'happy';
-    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    autoMode = prefs.getBool('klaus_auto_mode') ?? true;
+    if (autoMode) {
+      await _startListening(auto: true);
+    } else {
+      _set(KlausState.idle, 'Pronto! Toque para falar');
+    }
   }
 
   void _scheduleReconnect() {
@@ -253,6 +270,8 @@ class KlausClient extends ChangeNotifier {
         break;
       case 'tts':
         await _onTts(data);
+        break;
+      case 'listen':
         break;
       case 'mcp':
         // Ferramentas do aparelho ainda não usadas no Klaus Android.
@@ -319,6 +338,8 @@ class KlausClient extends ChangeNotifier {
   /// Liga/desliga a conversa automática (mãos livres).
   Future<void> toggleAuto() async {
     autoMode = !autoMode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('klaus_auto_mode', autoMode);
     if (autoMode) {
       await _startListening(auto: true);
     } else {
@@ -333,7 +354,11 @@ class KlausClient extends ChangeNotifier {
   Future<void> abort() async {
     _sendJson({'session_id': _sessionId, 'type': 'abort'});
     await speaker.interrupt();
-    if (!autoMode) _set(KlausState.idle, 'Pronto! Toque para falar');
+    if (autoMode) {
+      await _startListening(auto: true);
+    } else {
+      _set(KlausState.idle, 'Pronto! Toque para falar');
+    }
   }
 
   /// Envia uma mensagem escrita (como se tivesse sido dita).
@@ -369,6 +394,7 @@ class KlausClient extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _retry?.cancel();
+    _watchdog?.cancel();
     _closeWs();
     mic.dispose();
     speaker.release();
