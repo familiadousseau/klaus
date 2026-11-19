@@ -118,7 +118,9 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: _bg,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Klaus', style: TextStyle(fontWeight: FontWeight.bold)),
+        centerTitle: true,
+        title: const Text('Klaus',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24, letterSpacing: 2)),
         actions: [
           IconButton(
             tooltip: 'Escrever',
@@ -166,19 +168,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final ready = klaus.state != KlausState.starting && klaus.state != KlausState.connecting;
     return Column(
       children: [
-        const SizedBox(height: 8),
-        _face(),
-        const SizedBox(height: 10),
-        Text(klaus.status, style: const TextStyle(color: _cyan, fontSize: 16)),
-        const SizedBox(height: 8),
+        // A carinha ocupa o centro do ecrã.
         Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            itemCount: klaus.chat.length,
-            itemBuilder: (_, i) => _bubble(klaus.chat[i]),
-          ),
+          child: LayoutBuilder(builder: (ctx, c) {
+            final size = (c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight) * 0.9;
+            return Center(child: _face(size: size));
+          }),
         ),
+        Text(klaus.status, style: const TextStyle(color: _cyan, fontSize: 16)),
+        const SizedBox(height: 10),
         if (_showText) _textInput(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
@@ -186,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               _roundButton(
                 icon: klaus.autoMode ? Icons.hearing : Icons.hearing_disabled,
-                label: klaus.autoMode ? 'Auto: ON' : 'Auto: OFF',
+                label: klaus.autoMode ? 'Contínuo' : 'Manual',
                 color: klaus.autoMode ? _pink : _card,
                 onTap: ready ? klaus.toggleAuto : null,
               ),
@@ -194,9 +192,9 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: klaus.autoMode
                     ? _bigButton(
-                        icon: Icons.stop,
-                        label: 'Interromper',
-                        color: _card,
+                        icon: listening ? Icons.graphic_eq : Icons.stop,
+                        label: listening ? 'A ouvir...' : 'Interromper',
+                        color: listening ? _cyan : _card,
                         onDown: ready ? klaus.abort : null,
                       )
                     : _bigButton(
@@ -218,22 +216,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _bubble(ChatLine l) {
-    return Align(
-      alignment: l.fromUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        constraints: const BoxConstraints(maxWidth: 300),
-        decoration: BoxDecoration(
-          color: l.fromUser ? _cyan.withValues(alpha: 0.18) : _card,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Text(l.text, style: const TextStyle(color: Colors.white, fontSize: 15)),
-      ),
     );
   }
 
