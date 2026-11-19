@@ -12,25 +12,27 @@ class DeviceIdentity {
   final String clientId; // UUID
   final String serialNumber;
   final String hmacKey;
+  final String prefix;
 
   DeviceIdentity({
+    required this.prefix,
     required this.deviceId,
     required this.clientId,
     required this.serialNumber,
     required this.hmacKey,
   });
 
-  static const _kDevice = 'klaus_device_id';
-  static const _kClient = 'klaus_client_id';
-  static const _kSerial = 'klaus_serial';
-  static const _kHmac = 'klaus_hmac_key';
-
-  static Future<DeviceIdentity> load() async {
+  /// Cada idioma tem a sua identidade (o prefixo separa as chaves guardadas).
+  static Future<DeviceIdentity> load([String prefix = 'klaus_']) async {
+    final kDevice = '${prefix}device_id';
+    final kClient = '${prefix}client_id';
+    final kSerial = '${prefix}serial';
+    final kHmac = '${prefix}hmac_key';
     final prefs = await SharedPreferences.getInstance();
-    var deviceId = prefs.getString(_kDevice);
-    var clientId = prefs.getString(_kClient);
-    var serial = prefs.getString(_kSerial);
-    var hmacKey = prefs.getString(_kHmac);
+    var deviceId = prefs.getString(kDevice);
+    var clientId = prefs.getString(kClient);
+    var serial = prefs.getString(kSerial);
+    var hmacKey = prefs.getString(kHmac);
 
     if (deviceId == null || clientId == null || serial == null || hmacKey == null) {
       final rnd = Random.secure();
@@ -46,12 +48,13 @@ class DeviceIdentity {
       hmacKey = sha256
           .convert(utf8.encode('$deviceId||$clientId||${rnd.nextInt(1 << 31)}'))
           .toString();
-      await prefs.setString(_kDevice, deviceId);
-      await prefs.setString(_kClient, clientId);
-      await prefs.setString(_kSerial, serial);
-      await prefs.setString(_kHmac, hmacKey);
+      await prefs.setString(kDevice, deviceId);
+      await prefs.setString(kClient, clientId);
+      await prefs.setString(kSerial, serial);
+      await prefs.setString(kHmac, hmacKey);
     }
     return DeviceIdentity(
+      prefix: prefix,
       deviceId: deviceId,
       clientId: clientId,
       serialNumber: serial,
@@ -65,10 +68,10 @@ class DeviceIdentity {
   }
 
   /// Apaga a identidade (o Klaus passa a ser um "aparelho novo").
-  static Future<void> reset() async {
+  static Future<void> reset([String prefix = 'klaus_']) async {
     final prefs = await SharedPreferences.getInstance();
-    for (final k in [_kDevice, _kClient, _kSerial, _kHmac, 'klaus_ws_url', 'klaus_ws_token']) {
-      await prefs.remove(k);
+    for (final k in ['device_id', 'client_id', 'serial', 'hmac_key', 'ws_url', 'ws_token']) {
+      await prefs.remove('$prefix$k');
     }
   }
 }

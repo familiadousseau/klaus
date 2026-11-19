@@ -9,6 +9,7 @@ import 'package:web_socket_channel/io.dart';
 import 'audio.dart';
 import 'config.dart';
 import 'identity.dart';
+import 'languages.dart';
 import 'ota.dart';
 
 enum KlausState { starting, needsActivation, connecting, idle, listening, thinking, speaking, error }
@@ -31,6 +32,8 @@ class KlausClient extends ChangeNotifier {
   final List<ChatLine> chat = [];
 
   DeviceIdentity? identity;
+  KlausLang lang = kLangs.first;
+  int _gen = 0; // muda a cada troca de idioma, para cancelar esperas antigas
   IOWebSocketChannel? _ws;
   StreamSubscription? _wsSub;
   String _sessionId = '';
@@ -81,7 +84,10 @@ class KlausClient extends ChangeNotifier {
         _set(KlausState.error, 'Sem microfone');
         return;
       }
-      identity = await DeviceIdentity.load();
+      final prefs = await SharedPreferences.getInstance();
+      lang = langByCode(prefs.getString('klaus_lang') ?? 'pt');
+      _gen++;
+      identity = await DeviceIdentity.load(lang.prefix);
       await _runOta();
     } catch (e) {
       _fail('Não consegui falar com o servidor: $e');
@@ -105,9 +111,10 @@ class KlausClient extends ChangeNotifier {
   Future<void> _waitActivation(OtaClient ota, OtaResult first) async {
     if (_activating) return;
     _activating = true;
+    final gen = _gen;
     try {
       var r = first;
-      for (var i = 0; i < 120 && !_disposed; i++) {
+      for (var i = 0; i < 120 && !_disposed && gen == _gen; i++) {
         await Future.delayed(const Duration(seconds: 5));
         if (r.challenge != null && r.challenge!.isNotEmpty) {
           try {
@@ -123,7 +130,7 @@ class KlausClient extends ChangeNotifier {
           }
         } catch (_) {}
       }
-      if (_disposed) return;
+      if (_disposed || gen != _gen) return;
       final again = await ota.fetch();
       if (again.needsActivation) {
         activationCode = again.activationCode;
@@ -143,7 +150,7 @@ class KlausClient extends ChangeNotifier {
 
   Future<void> connect() async {
     await _closeWs();
-    final (url, token) = await OtaClient.savedEndpoint();
+    final (url, token) = await OtaClient.savedEndpoint(identity!.prefix);
     if (url == null) {
       _fail('O servidor não indicou o endereço de ligação.');
       return;
@@ -256,7 +263,13 @@ class KlausClient extends ChangeNotifier {
         if (!helloDone.isCompleted) helloDone.complete(true);
         break;
       case 'stt':
-        _addChat(true, data['text']?.toString() ?? '');
+        final said = data['text']?.toString() ?? '';
+        _addChat(true, said);
+        final wanted = detectLanguageSwitch(said);
+        if (wanted != null && wanted != lang.code) {
+          await switchLanguage(wanted);
+          return;
+        }
         _set(KlausState.thinking, 'A pensar...');
         emotion = 'thinking';
         notifyListeners();
@@ -376,10 +389,33 @@ class KlausClient extends ChangeNotifier {
     _set(KlausState.thinking, 'A pensar...');
   }
 
+  /// Troca para o Klaus de outro idioma (outro agente, com voz nativa).
+  Future<void> switchLanguage(String code) async {
+    final target = langByCode(code);
+    if (target.code == lang.code && state != KlausState.error) return;
+    _gen++;
+    _activating = false;
+    _sendJson({'session_id': _sessionId, 'type': 'abort'});
+    await mic.stop();
+    await speaker.interrupt();
+    await _closeWs();
+    lang = target;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('klaus_lang', lang.code);
+    emotion = 'thinking';
+    _set(KlausState.connecting, 'A mudar para ${lang.name} ${lang.flag}...');
+    try {
+      identity = await DeviceIdentity.load(lang.prefix);
+      await _runOta();
+    } catch (e) {
+      _fail('Não consegui mudar de idioma: $e');
+    }
+  }
+
   Future<void> resetIdentity() async {
     await _closeWs();
     await mic.stop();
-    await DeviceIdentity.reset();
+    await DeviceIdentity.reset(lang.prefix);
     chat.clear();
     await start();
   }

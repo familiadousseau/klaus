@@ -70,8 +70,8 @@ class OtaClient {
     }
     if (wsUrl != null) {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('klaus_ws_url', wsUrl);
-      await prefs.setString('klaus_ws_token', wsToken ?? 'test-token');
+      await prefs.setString('${id.prefix}ws_url', wsUrl);
+      await prefs.setString('${id.prefix}ws_token', wsToken ?? 'test-token');
     }
 
     final act = data['activation'];
@@ -105,8 +105,8 @@ class OtaClient {
     return resp.statusCode == 200;
   }
 
-  static Future<(String?, String?)> savedEndpoint() async {
+  static Future<(String?, String?)> savedEndpoint(String prefix) async {
     final prefs = await SharedPreferences.getInstance();
-    return (prefs.getString('klaus_ws_url'), prefs.getString('klaus_ws_token'));
+    return (prefs.getString('${prefix}ws_url'), prefs.getString('${prefix}ws_token'));
   }
 }

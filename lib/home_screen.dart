@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'config.dart';
 import 'klaus_client.dart';
+import 'languages.dart';
 import 'updater.dart';
 
 const _bg = Color(0xFF101628);
@@ -176,7 +177,9 @@ class _HomeScreenState extends State<HomeScreen> {
           }),
         ),
         Text(klaus.status, style: const TextStyle(color: _cyan, fontSize: 16)),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
+        _langChip(),
+        const SizedBox(height: 6),
         if (_showText) _textInput(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
@@ -216,6 +219,49 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _langChip() {
+    return ActionChip(
+      backgroundColor: _card,
+      side: BorderSide.none,
+      label: Text('${klaus.lang.flag}  ${klaus.lang.name}  ▾',
+          style: const TextStyle(color: Colors.white, fontSize: 15)),
+      onPressed: _pickLanguage,
+    );
+  }
+
+  void _pickLanguage() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _card,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.all(14),
+            child: Text('Com que Klaus quer falar?',
+                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+          ),
+          for (final l in kLangs)
+            ListTile(
+              leading: Text(l.flag, style: const TextStyle(fontSize: 26)),
+              title: Text(l.name, style: const TextStyle(color: Colors.white)),
+              subtitle: Text(l.agentName, style: const TextStyle(color: Colors.white54)),
+              trailing: l.code == klaus.lang.code ? const Icon(Icons.check, color: _cyan) : null,
+              onTap: () {
+                Navigator.pop(ctx);
+                klaus.switchLanguage(l.code);
+              },
+            ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
+            child: Text(
+                'Também pode dizer: "vamos treinar inglês", "vamos treinar italiano" ou "voltar ao português".',
+                style: TextStyle(color: Colors.white54)),
+          ),
+        ]),
+      ),
     );
   }
 
@@ -305,15 +351,15 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(children: [
         _face(size: 180),
         const SizedBox(height: 12),
-        const Text('Vamos ativar o Klaus neste telemóvel',
+        Text('Vamos ativar o ${klaus.lang.agentName} ${klaus.lang.flag}',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
-        const Text(
+        Text(
           '1. Abra o painel do XiaoZhi\n'
-          '2. No agente Klaus, toque em "Add Device"\n'
+          '2. No agente "${klaus.lang.agentName}", toque em "Add Device"\n'
           '3. Escreva este código:',
-          style: TextStyle(color: Colors.white70, fontSize: 15, height: 1.5),
+          style: const TextStyle(color: Colors.white70, fontSize: 15, height: 1.5),
         ),
         const SizedBox(height: 16),
         GestureDetector(
@@ -340,6 +386,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 10),
         TextButton(onPressed: klaus.start, child: const Text('Tentar de novo')),
+        if (klaus.lang.code != 'pt')
+          TextButton(
+            onPressed: () => klaus.switchLanguage('pt'),
+            child: const Text('Voltar ao Klaus em português'),
+          ),
         const SizedBox(height: 10),
         const Text('Depois de introduzir o código, o Klaus liga-se sozinho em alguns segundos.',
             textAlign: TextAlign.center, style: TextStyle(color: Colors.white38)),
