@@ -126,7 +126,10 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             tooltip: 'Escrever',
             icon: Icon(_showText ? Icons.keyboard_hide : Icons.keyboard),
-            onPressed: () => setState(() => _showText = !_showText),
+            onPressed: () {
+              setState(() => _showText = !_showText);
+              klaus.setTextMode(_showText);
+            },
           ),
           IconButton(
             tooltip: 'Opções',
@@ -169,18 +172,32 @@ class _HomeScreenState extends State<HomeScreen> {
     final ready = klaus.state != KlausState.starting && klaus.state != KlausState.connecting;
     return Column(
       children: [
-        // A carinha ocupa o centro do ecrã.
-        Expanded(
-          child: LayoutBuilder(builder: (ctx, c) {
-            final size = (c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight) * 0.9;
-            return Center(child: _face(size: size));
-          }),
-        ),
+        if (_showText) ...[
+          // Modo escrito: carinha menor e histórico da conversa.
+          const SizedBox(height: 4),
+          _face(size: 150),
+          Expanded(
+            child: ListView.builder(
+              controller: _scroll,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              itemCount: klaus.chat.length,
+              itemBuilder: (_, i) => _bubble(klaus.chat[i]),
+            ),
+          ),
+        ] else
+          // A carinha ocupa o centro do ecrã.
+          Expanded(
+            child: LayoutBuilder(builder: (ctx, c) {
+              final size = (c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight) * 0.9;
+              return Center(child: _face(size: size));
+            }),
+          ),
         Text(klaus.status, style: const TextStyle(color: _cyan, fontSize: 16)),
         const SizedBox(height: 8),
         _langChip(),
         const SizedBox(height: 6),
         if (_showText) _textInput(),
+        if (!_showText)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
           child: Row(
@@ -265,6 +282,22 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _bubble(ChatLine l) {
+    return Align(
+      alignment: l.fromUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: const BoxConstraints(maxWidth: 300),
+        decoration: BoxDecoration(
+          color: l.fromUser ? _cyan.withValues(alpha: 0.18) : _card,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text(l.text, style: const TextStyle(color: Colors.white, fontSize: 15)),
+      ),
+    );
+  }
+
   Widget _textInput() {
     void send() {
       klaus.sendText(_text.text);
@@ -272,8 +305,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
       child: Row(children: [
+        IconButton(
+          tooltip: klaus.textModeVoice ? 'Klaus fala as respostas' : 'Respostas só escritas',
+          onPressed: klaus.toggleTextVoice,
+          icon: Icon(klaus.textModeVoice ? Icons.volume_up : Icons.volume_off,
+              color: klaus.textModeVoice ? _cyan : Colors.white54),
+        ),
         Expanded(
           child: TextField(
             controller: _text,

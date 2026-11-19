@@ -29,6 +29,12 @@ class KlausClient extends ChangeNotifier {
   String? errorText;
   /// Conversa contínua (mãos livres). Ligada por defeito e lembrada entre aberturas.
   bool autoMode = true;
+
+  /// Modo escrito: o microfone fica parado e as respostas aparecem em texto.
+  bool textMode = false;
+
+  /// No modo escrito, se true o Klaus também fala as respostas.
+  bool textModeVoice = false;
   final List<ChatLine> chat = [];
 
   DeviceIdentity? identity;
@@ -53,7 +59,7 @@ class KlausClient extends ChangeNotifier {
     state = s;
     status = msg;
     _watchdog?.cancel();
-    if (s == KlausState.thinking && autoMode) {
+    if (s == KlausState.thinking && autoMode && !textMode) {
       _watchdog = Timer(const Duration(seconds: 20), () {
         if (!_disposed && autoMode && state == KlausState.thinking) {
           _startListening(auto: true);
@@ -210,7 +216,9 @@ class KlausClient extends ChangeNotifier {
     emotion = 'happy';
     final prefs = await SharedPreferences.getInstance();
     autoMode = prefs.getBool('klaus_auto_mode') ?? true;
-    if (autoMode) {
+    if (textMode) {
+      _set(KlausState.idle, 'Modo escrito');
+    } else if (autoMode) {
       await _startListening(auto: true);
     } else {
       _set(KlausState.idle, 'Pronto! Toque para falar');
@@ -243,6 +251,7 @@ class KlausClient extends ChangeNotifier {
 
   Future<void> _onMessage(dynamic msg, Completer<bool> helloDone) async {
     if (msg is List<int>) {
+      if (textMode && !textModeVoice) return; // modo escrito sem som
       speaker.addOpus(Uint8List.fromList(msg));
       return;
     }
@@ -295,8 +304,8 @@ class KlausClient extends ChangeNotifier {
   Future<void> _onTts(Map<String, dynamic> data) async {
     switch (data['state']) {
       case 'start':
-        if (autoMode) await mic.stop();
-        _set(KlausState.speaking, 'A falar...');
+        if (autoMode || textMode) await mic.stop();
+        _set(KlausState.speaking, textMode && !textModeVoice ? 'A escrever...' : 'A falar...');
         break;
       case 'sentence_start':
         _addChat(false, data['text']?.toString() ?? '');
@@ -304,7 +313,9 @@ class KlausClient extends ChangeNotifier {
       case 'stop':
         await speaker.drain();
         if (_disposed) return;
-        if (autoMode) {
+        if (textMode) {
+          _set(KlausState.idle, 'Modo escrito');
+        } else if (autoMode) {
           await _startListening(auto: true);
         } else {
           _set(KlausState.idle, 'Pronto! Toque para falar');
@@ -367,7 +378,9 @@ class KlausClient extends ChangeNotifier {
   Future<void> abort() async {
     _sendJson({'session_id': _sessionId, 'type': 'abort'});
     await speaker.interrupt();
-    if (autoMode) {
+    if (textMode) {
+      _set(KlausState.idle, 'Modo escrito');
+    } else if (autoMode) {
       await _startListening(auto: true);
     } else {
       _set(KlausState.idle, 'Pronto! Toque para falar');
@@ -387,6 +400,38 @@ class KlausClient extends ChangeNotifier {
       'text': t,
     });
     _set(KlausState.thinking, 'A pensar...');
+  }
+
+  /// Entra/sai do modo escrito.
+  Future<void> setTextMode(bool on) async {
+    if (textMode == on) return;
+    textMode = on;
+    if (on) {
+      textModeVoice = false;
+      if (mic.isRunning) {
+        await mic.stop();
+        _sendJson({'session_id': _sessionId, 'type': 'listen', 'state': 'stop'});
+      }
+      await speaker.interrupt();
+      if (_ws != null) _set(KlausState.idle, 'Modo escrito');
+    } else {
+      await speaker.interrupt();
+      if (_ws != null) {
+        if (autoMode) {
+          await _startListening(auto: true);
+        } else {
+          _set(KlausState.idle, 'Pronto! Toque para falar');
+        }
+      }
+    }
+    notifyListeners();
+  }
+
+  /// No modo escrito: liga/desliga a voz do Klaus.
+  Future<void> toggleTextVoice() async {
+    textModeVoice = !textModeVoice;
+    if (!textModeVoice) await speaker.interrupt();
+    notifyListeners();
   }
 
   /// Troca para o Klaus de outro idioma (outro agente, com voz nativa).
