@@ -55,6 +55,8 @@ class KlausClient extends ChangeNotifier {
   // ---- Sono ----
   final WakeWordDetector wake = WakeWordDetector();
   bool sleeping = false;
+  bool _sleepAfterReply = false;
+  Timer? _farewellTimer;
   bool drowsy = false;
   DateTime _lastActivity = DateTime.now();
   Timer? _sleepTimer;
@@ -301,6 +303,7 @@ class KlausClient extends ChangeNotifier {
       case 'stt':
         final said = data['text']?.toString() ?? '';
         _addChat(true, said);
+        if (detectFarewell(said)) _armFarewell();
         final wanted = detectLanguageSwitch(said);
         if (wanted != null && wanted != lang.code) {
           await switchLanguage(wanted);
@@ -311,6 +314,8 @@ class KlausClient extends ChangeNotifier {
         notifyListeners();
         break;
       case 'llm':
+        // 👋 = a IA percebeu que é uma despedida (combinado na personalidade).
+        if ((data['text']?.toString() ?? '').contains('👋')) _armFarewell();
         // O servidor só manda informação útil quando não é "feliz"/"neutro".
         final e = data['emotion']?.toString();
         if (EmotionEngine.isInformative(e)) {
@@ -339,6 +344,7 @@ class KlausClient extends ChangeNotifier {
         break;
       case 'sentence_start':
         final sentence = data['text']?.toString() ?? '';
+        if (sentence.contains('👋')) _armFarewell();
         _addChat(false, sentence);
         // Carinha frase a frase: o que ele diz manda; a emoção do servidor só
         // vale para a primeira frase da resposta.
@@ -351,6 +357,10 @@ class KlausClient extends ChangeNotifier {
         if (_disposed) return;
         _serverEmotion = null;
         emotion = 'neutral';
+        if (_sleepAfterReply) {
+          await goToSleep();
+          return;
+        }
         if (textMode) {
           _set(KlausState.idle, 'Modo escrito');
         } else if (autoMode) {
@@ -447,6 +457,16 @@ class KlausClient extends ChangeNotifier {
     _set(KlausState.thinking, 'A pensar...');
   }
 
+  /// Despedida percebida: o Klaus termina a resposta e adormece.
+  void _armFarewell() {
+    if (_sleepAfterReply || sleeping) return;
+    _sleepAfterReply = true;
+    _farewellTimer?.cancel();
+    _farewellTimer = Timer(const Duration(seconds: 15), () {
+      if (_sleepAfterReply && !sleeping) goToSleep();
+    });
+  }
+
   /// Regista que houve interação (adia o sono).
   void markActivity() {
     _lastActivity = DateTime.now();
@@ -481,6 +501,8 @@ class KlausClient extends ChangeNotifier {
   Future<void> goToSleep() async {
     if (sleeping) return;
     sleeping = true;
+    _sleepAfterReply = false;
+    _farewellTimer?.cancel();
     drowsy = false;
     if (mic.isRunning) {
       _sendJson({'session_id': _sessionId, 'type': 'listen', 'state': 'stop'});
@@ -489,7 +511,7 @@ class KlausClient extends ChangeNotifier {
     await speaker.interrupt();
     await _closeWs();
     emotion = 'sleeping';
-    _set(KlausState.idle, 'A dormir... diga "Klaus" ou toque no ecrã');
+    _set(KlausState.idle, 'A dormir... chame "Klaus"');
     try {
       await wake.start(() => wakeUp());
     } catch (e) {
@@ -599,6 +621,7 @@ class KlausClient extends ChangeNotifier {
     _retry?.cancel();
     _watchdog?.cancel();
     _sleepTimer?.cancel();
+    _farewellTimer?.cancel();
     wake.dispose();
     _closeWs();
     mic.dispose();

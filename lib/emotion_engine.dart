@@ -23,6 +23,7 @@ class EmotionEngine {
     '😕': 'confused', '🤨': 'confused',
     '😳': 'embarrassed',
     '😋': 'delicious',
+    '👋': 'winking',
   };
 
   /// Regras por palavras (texto já sem acentos e em minúsculas; cada palavra-chave

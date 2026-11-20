@@ -49,3 +49,15 @@ String? detectLanguageSwitch(String spoken) {
   if (any(['italiano', 'italian'])) return 'it';
   return null;
 }
+
+/// Descobre se a frase dita é uma despedida (para o Klaus ir dormir).
+bool detectFarewell(String spoken) {
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z0-9 ]+"), ' ')} ';
+  const words = [
+    ' tchau', ' xau', ' adeus', ' ate logo', ' ate mais', ' ate amanha', ' ate depois',
+    ' fui ', ' vou dormir', ' boa noite klaus', ' boa noite claus',
+    ' bye', ' goodbye', ' good bye', ' see you', ' good night',
+    ' ciao', ' arrivederci', ' a dopo', ' a domani', ' buonanotte',
+  ];
+  return words.any(t.contains);
+}

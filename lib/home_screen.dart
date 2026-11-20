@@ -166,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Opacity(opacity: 0.55, child: _face(size: 220)),
             const SizedBox(height: 20),
-            const Text('Zzz... diga "Klaus" ou toque para acordar',
+            const Text('Zzz... chame "Klaus" para acordar',
                 style: TextStyle(color: Colors.white24, fontSize: 14)),
           ],
         ),
@@ -505,14 +505,6 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () {
               Navigator.pop(ctx);
               launchUrl(Uri.parse(KlausConfig.consoleUrl), mode: LaunchMode.externalApplication);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.bedtime, color: _cyan),
-            title: const Text('Pôr o Klaus a dormir agora', style: TextStyle(color: Colors.white)),
-            onTap: () {
-              Navigator.pop(ctx);
-              klaus.goToSleep();
             },
           ),
           ListTile(
