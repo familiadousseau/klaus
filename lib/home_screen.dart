@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'config.dart';
 import 'klaus_client.dart';
 import 'languages.dart';
+import 'pip.dart';
 import 'updater.dart';
 
 const _bg = Color(0xFF101628);
@@ -29,6 +30,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final KlausClient klaus = KlausClient();
+  final KlausPip pip = KlausPip();
   final TextEditingController _text = TextEditingController();
   final ScrollController _scroll = ScrollController();
   Timer? _anim;
@@ -39,6 +41,14 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     klaus.addListener(_onChange);
     klaus.start();
+    // Janelinha flutuante: botões 🎤 e ⏹ na própria janelinha.
+    pip.onAction = (a) {
+      if (a == 'wake') klaus.wakeUp();
+      if (a == 'sleep') klaus.goToSleep();
+      if (a == 'radio_stop') klaus.radio.stop();
+    };
+    pip.addListener(_onPip);
+    pip.init().then((_) => _syncPip());
     _anim = Timer.periodic(const Duration(milliseconds: 80), (_) {
       if (klaus.state == KlausState.listening || klaus.state == KlausState.speaking) {
         setState(() {});
@@ -47,8 +57,15 @@ class _HomeScreenState extends State<HomeScreen> {
     Future.delayed(const Duration(seconds: 3), () => _checkUpdate(silent: true));
   }
 
+  void _onPip() {
+    if (mounted) setState(() {});
+  }
+
+  void _syncPip() => pip.sync(sleeping: klaus.sleeping, radio: klaus.radio.isPlaying);
+
   void _onChange() {
     if (!mounted) return;
+    _syncPip();
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
@@ -62,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _anim?.cancel();
     klaus.removeListener(_onChange);
+    pip.removeListener(_onPip);
     klaus.dispose();
     _text.dispose();
     _scroll.dispose();
@@ -111,8 +129,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ---------------- interface ----------------
 
+  /// Na janelinha flutuante: só a carinha, do tamanho da janela (o GIF é quadrado).
+  Widget _pipView() {
+    return Scaffold(
+      backgroundColor: klaus.sleeping ? Colors.black : _bg,
+      body: LayoutBuilder(builder: (ctx, c) {
+        final size = c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight;
+        return Center(child: _face(size: size));
+      }),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (pip.inPip) return _pipView();
     return Scaffold(
       backgroundColor: klaus.sleeping ? Colors.black : _bg,
       appBar: klaus.sleeping ? null : AppBar(
@@ -131,6 +161,12 @@ class _HomeScreenState extends State<HomeScreen> {
               klaus.setTextMode(_showText);
             },
           ),
+          if (pip.supported)
+            IconButton(
+              tooltip: 'Janelinha flutuante',
+              icon: const Icon(Icons.picture_in_picture_alt),
+              onPressed: pip.enter,
+            ),
           IconButton(
             tooltip: 'Opções',
             icon: const Icon(Icons.more_vert),
@@ -520,6 +556,22 @@ class _HomeScreenState extends State<HomeScreen> {
               _checkUpdate();
             },
           ),
+          if (pip.supported)
+            StatefulBuilder(
+              builder: (c, setLocal) => SwitchListTile(
+                secondary: const Icon(Icons.picture_in_picture_alt, color: _cyan),
+                title: const Text('Janelinha ao sair do app', style: TextStyle(color: Colors.white)),
+                subtitle: const Text('O Klaus fica num quadradinho por cima das outras apps',
+                    style: TextStyle(color: Colors.white54)),
+                value: pip.enabled,
+                activeColor: _cyan,
+                onChanged: (v) async {
+                  await pip.setEnabled(v);
+                  _syncPip();
+                  setLocal(() {});
+                },
+              ),
+            ),
           ListTile(
             leading: const Icon(Icons.dashboard_customize, color: _cyan),
             title: const Text('Painel do XiaoZhi (personalidade)',
