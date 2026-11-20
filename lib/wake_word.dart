@@ -1,28 +1,24 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
-/// Ouve a palavra "Klaus" no próprio telemóvel, sem internet.
-/// Usado enquanto o Klaus dorme, para poupar bateria e dados.
-class WakeWordDetector {
+/// Reconhece a palavra "Klaus" no próprio telemóvel, sem internet.
+/// Não tem microfone próprio: recebe os frames do [MicHub] através de [feed].
+class WakeWordEngine {
   static bool _bindingsReady = false;
 
   sherpa.KeywordSpotter? _spotter;
   sherpa.OnlineStream? _stream;
-  final AudioRecorder _rec = AudioRecorder();
-  StreamSubscription<Uint8List>? _sub;
-  bool _running = false;
-  bool _busy = false;
+  List<String> _baseKeywords = [];
+  String _sensitivity = 'normal';
 
-  /// Sensibilidade (0.05 = muito sensível … 0.5 = exigente).
-  double threshold = 0.2;
+  /// Mensagem de erro, se o reconhecimento não conseguiu arrancar.
+  String? error;
 
-  bool get isRunning => _running;
+  bool get ready => _spotter != null && _stream != null;
 
   Future<String> _copyAsset(String dir, String name) async {
     final f = File('$dir/$name');
@@ -34,93 +30,112 @@ class WakeWordDetector {
     return f.path;
   }
 
-  Future<void> _init() async {
+  /// Prepara o modelo (uma vez). Em caso de falha, guarda a razão em [error].
+  Future<void> init() async {
     if (_spotter != null) return;
-    if (!_bindingsReady) {
-      sherpa.initBindings();
-      _bindingsReady = true;
-    }
-    final base = await getApplicationSupportDirectory();
-    final dir = Directory('${base.path}/kws');
-    if (!await dir.exists()) await dir.create(recursive: true);
-    final encoder = await _copyAsset(dir.path, 'encoder.onnx');
-    final decoder = await _copyAsset(dir.path, 'decoder.onnx');
-    final joiner = await _copyAsset(dir.path, 'joiner.onnx');
-    final tokens = await _copyAsset(dir.path, 'tokens.txt');
-    final keywords = await _copyAsset(dir.path, 'keywords.txt');
-
-    _spotter = sherpa.KeywordSpotter(sherpa.KeywordSpotterConfig(
-      model: sherpa.OnlineModelConfig(
-        transducer: sherpa.OnlineTransducerModelConfig(
-          encoder: encoder,
-          decoder: decoder,
-          joiner: joiner,
-        ),
-        tokens: tokens,
-        numThreads: 1,
-        debug: false,
-      ),
-      keywordsFile: keywords,
-      keywordsThreshold: threshold,
-      keywordsScore: 1.5,
-    ));
-  }
-
-  /// Começa a ouvir. [onWake] é chamado uma vez quando ouvir "Klaus".
-  Future<void> start(void Function() onWake) async {
-    if (_running) return;
-    await _init();
-    _stream?.free();
-    _stream = _spotter!.createStream();
-    final audio = await _rec.startStream(const RecordConfig(
-      encoder: AudioEncoder.pcm16bits,
-      sampleRate: 16000,
-      numChannels: 1,
-      noiseSuppress: true,
-      echoCancel: true, // não ouvir a própria voz do Klaus
-    ));
-    _running = true;
-    _sub = audio.listen((chunk) {
-      if (!_running || _busy || _stream == null) return;
-      _busy = true;
-      try {
-        final pcm = Uint8List.fromList(chunk).buffer.asInt16List();
-        final f = Float32List(pcm.length);
-        for (var i = 0; i < pcm.length; i++) {
-          f[i] = pcm[i] / 32768.0;
-        }
-        _stream!.acceptWaveform(samples: f, sampleRate: 16000);
-        while (_spotter!.isReady(_stream!)) {
-          _spotter!.decode(_stream!);
-        }
-        final kw = _spotter!.getResult(_stream!).keyword;
-        if (kw.isNotEmpty) {
-          _spotter!.reset(_stream!);
-          onWake();
-        }
-      } catch (_) {
-      } finally {
-        _busy = false;
-      }
-    });
-  }
-
-  Future<void> stop() async {
-    if (!_running) return;
-    _running = false;
-    await _sub?.cancel();
-    _sub = null;
     try {
-      await _rec.stop();
-    } catch (_) {}
+      if (!_bindingsReady) {
+        sherpa.initBindings();
+        _bindingsReady = true;
+      }
+      final base = await getApplicationSupportDirectory();
+      final dir = Directory('${base.path}/kws');
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final encoder = await _copyAsset(dir.path, 'encoder.onnx');
+      final decoder = await _copyAsset(dir.path, 'decoder.onnx');
+      final joiner = await _copyAsset(dir.path, 'joiner.onnx');
+      final tokens = await _copyAsset(dir.path, 'tokens.txt');
+      final keywordsPath = await _copyAsset(dir.path, 'keywords.txt');
+
+      _baseKeywords = File(keywordsPath)
+          .readAsLinesSync()
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .map((l) => l.split('@').first.split(RegExp(r'\s[:#]')).first.trim())
+          .toList();
+
+      _spotter = sherpa.KeywordSpotter(sherpa.KeywordSpotterConfig(
+        model: sherpa.OnlineModelConfig(
+          transducer: sherpa.OnlineTransducerModelConfig(
+            encoder: encoder,
+            decoder: decoder,
+            joiner: joiner,
+          ),
+          tokens: tokens,
+          numThreads: 1,
+          debug: false,
+        ),
+        keywordsFile: keywordsPath,
+        keywordsThreshold: 0.15,
+        keywordsScore: 2.0,
+      ));
+      _newStream();
+      error = null;
+    } catch (e) {
+      error = 'Reconhecimento de "Klaus" indisponível: $e';
+      _spotter = null;
+      _stream = null;
+    }
   }
 
-  Future<void> dispose() async {
-    await stop();
+  /// Sensibilidade: 'alta' (acorda mais fácil), 'normal' ou 'baixa' (menos falsos alarmes).
+  void setSensitivity(String s) {
+    _sensitivity = s;
+    if (_spotter != null) _newStream();
+  }
+
+  void _newStream() {
+    _stream?.free();
+    _stream = null;
+    final (score, thr) = switch (_sensitivity) {
+      'alta' => (2.5, 0.08),
+      'baixa' => (1.5, 0.25),
+      _ => (2.0, 0.15),
+    };
+    // Cada palavra leva o seu reforço (:) e limiar (#). Separadas por "/".
+    final kw = _baseKeywords.map((t) => '$t :$score #$thr @KLAUS').join('/');
+    try {
+      _stream = kw.isEmpty ? _spotter!.createStream() : _spotter!.createStream(keywords: kw);
+    } catch (_) {
+      _stream = _spotter!.createStream(); // usa o ficheiro tal como está
+    }
+  }
+
+  /// Recebe 60 ms de áudio. Devolve true se ouviu "Klaus".
+  bool feed(Int16List pcm) {
+    final st = _stream;
+    final sp = _spotter;
+    if (st == null || sp == null) return false;
+    final f = Float32List(pcm.length);
+    for (var i = 0; i < pcm.length; i++) {
+      f[i] = pcm[i] / 32768.0;
+    }
+    st.acceptWaveform(samples: f, sampleRate: 16000);
+    while (sp.isReady(st)) {
+      sp.decode(st);
+    }
+    if (sp.getResult(st).keyword.isNotEmpty) {
+      sp.reset(st);
+      return true;
+    }
+    return false;
+  }
+
+  /// Limpa o que estava a meio (ao mudar de estado).
+  void reset() {
+    final st = _stream;
+    final sp = _spotter;
+    if (st != null && sp != null) {
+      try {
+        sp.reset(st);
+      } catch (_) {}
+    }
+  }
+
+  void dispose() {
     _stream?.free();
     _stream = null;
     _spotter?.free();
     _spotter = null;
-    _rec.dispose();
   }
 }

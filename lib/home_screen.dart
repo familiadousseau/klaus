@@ -40,7 +40,9 @@ class _HomeScreenState extends State<HomeScreen> {
     klaus.addListener(_onChange);
     klaus.start();
     _anim = Timer.periodic(const Duration(milliseconds: 80), (_) {
-      if (klaus.state == KlausState.listening || klaus.state == KlausState.speaking) {
+      if (klaus.state == KlausState.listening ||
+          klaus.state == KlausState.speaking ||
+          klaus.state == KlausState.standby) {
         setState(() {});
       }
     });
@@ -114,8 +116,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: klaus.sleeping ? Colors.black : _bg,
-      appBar: klaus.sleeping ? null : AppBar(
+      backgroundColor: klaus.sleeping && klaus.deepSleep ? Colors.black : _bg,
+      appBar: klaus.sleeping && klaus.deepSleep ? null : AppBar(
         backgroundColor: _bg,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -155,19 +157,40 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _sleepView() {
+    final deep = klaus.deepSleep;
+    final err = klaus.wake.error;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: klaus.wakeUp,
       child: Container(
-        color: Colors.black,
+        color: deep ? Colors.black : _bg,
         width: double.infinity,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Opacity(opacity: 0.55, child: _face(size: 220)),
+            Opacity(opacity: deep ? 0.5 : 0.8, child: _face(size: deep ? 220 : 260)),
             const SizedBox(height: 20),
-            const Text('Zzz... chame "Klaus" para acordar',
-                style: TextStyle(color: Colors.white24, fontSize: 14)),
+            Text(
+              err == null ? 'Chame "Klaus" para conversar' : 'Toque no ecrã para conversar',
+              style: TextStyle(color: deep ? Colors.white24 : Colors.white54, fontSize: 15),
+            ),
+            if (err != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
+                child: Text(err,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: _pink, fontSize: 12)),
+              ),
+            const SizedBox(height: 14),
+            // Pequeno indicador: o microfone está mesmo a ouvir.
+            Container(
+              width: 8 + klaus.micLevel * 60,
+              height: 4,
+              decoration: BoxDecoration(
+                color: (deep ? Colors.white24 : _cyan).withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
           ],
         ),
       ),
@@ -229,29 +252,24 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Row(
             children: [
               _roundButton(
-                icon: klaus.autoMode ? Icons.hearing : Icons.hearing_disabled,
-                label: klaus.autoMode ? 'Contínuo' : 'Manual',
-                color: klaus.autoMode ? _pink : _card,
-                onTap: ready ? klaus.toggleAuto : null,
+                icon: Icons.tune,
+                label: 'Ajustes',
+                color: _card,
+                onTap: _openHearingSettings,
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: klaus.autoMode
-                    ? _bigButton(
-                        icon: listening ? Icons.graphic_eq : Icons.stop,
-                        label: listening
-                            ? (klaus.mic.voiceActive ? 'A ouvir...' : 'À espera...')
-                            : 'Interromper',
-                        color: listening ? (klaus.mic.voiceActive ? _cyan : _card) : _card,
-                        onDown: ready ? klaus.abort : null,
-                      )
-                    : _bigButton(
-                        icon: listening ? Icons.mic : Icons.mic_none,
-                        label: listening ? 'A ouvir... solte' : 'Segure para falar',
-                        color: listening ? _pink : _cyan,
-                        onDown: ready ? klaus.pressToTalk : null,
-                        onUp: klaus.releaseToTalk,
-                      ),
+                child: _bigButton(
+                  icon: listening ? Icons.mic : Icons.mic_none,
+                  label: listening
+                      ? 'A ouvir...'
+                      : klaus.state == KlausState.speaking
+                          ? 'Segure para interromper'
+                          : 'Segure para falar',
+                  color: listening ? _pink : _cyan,
+                  onDown: ready ? klaus.pressToTalk : null,
+                  onUp: klaus.releaseToTalk,
+                ),
               ),
               const SizedBox(width: 12),
               _roundButton(
@@ -482,6 +500,49 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _openHearingSettings() {
+    Widget seg(String title, String help, String value, List<(String, String)> opts,
+        Future<void> Function(String) onSel, StateSetter setSheet) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+          Text(help, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          const SizedBox(height: 6),
+          SegmentedButton<String>(
+            segments: [for (final o in opts) ButtonSegment(value: o.$1, label: Text(o.$2))],
+            selected: {value},
+            onSelectionChanged: (v) async {
+              await onSel(v.first);
+              setSheet(() {});
+            },
+          ),
+        ]),
+      );
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _card,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            seg('Ouvir "Klaus"', 'Alta acorda mais fácil; Baixa evita acordar sozinho.',
+                klaus.wakeSensitivity, const [('baixa', 'Baixa'), ('normal', 'Normal'), ('alta', 'Alta')],
+                klaus.setWakeSensitivity, setSheet),
+            seg('Microfone', 'Alta ouve voz baixa ou longe; Baixa ignora mais barulho.',
+                klaus.micSensitivity, const [('baixa', 'Baixa'), ('normal', 'Normal'), ('alta', 'Alta')],
+                klaus.setMicSensitivity, setSheet),
+            seg('Pausa antes de responder', 'Quanto silêncio ele espera para saber que acabou.',
+                klaus.pauseLength, const [('curta', 'Curta'), ('normal', 'Normal'), ('longa', 'Longa')],
+                klaus.setPauseLength, setSheet),
+            const SizedBox(height: 14),
+          ]),
+        ),
+      ),
+    );
+  }
+
   void _openMenu() {
     showModalBottomSheet(
       context: context,
@@ -496,6 +557,16 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () {
               Navigator.pop(ctx);
               _checkUpdate();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.hearing, color: _cyan),
+            title: const Text('Ajustes de audição', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Sensibilidade ao "Klaus", ao microfone e pausa',
+                style: TextStyle(color: Colors.white54)),
+            onTap: () {
+              Navigator.pop(ctx);
+              _openHearingSettings();
             },
           ),
           ListTile(
