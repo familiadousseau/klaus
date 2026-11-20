@@ -302,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
             child: Text(
-                'Também pode dizer: "vamos treinar inglês", "vamos treinar italiano" ou "voltar ao português".',
+                'Também pode dizer: "Klaus, inglês!", "Klaus, italiano!", "Klaus, alemão!" ou "Klaus, português!".',
                 style: TextStyle(color: Colors.white54)),
           ),
         ]),

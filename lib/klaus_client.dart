@@ -64,8 +64,8 @@ class KlausClient extends ChangeNotifier {
   bool drowsy = false;
   DateTime _lastActivity = DateTime.now();
   Timer? _sleepTimer;
-  static const drowsyAfter = Duration(minutes: 2);
-  static const sleepAfter = Duration(minutes: 3);
+  static const drowsyAfter = Duration(seconds: 40);
+  static const sleepAfter = Duration(seconds: 60);
   String? _serverEmotion;
   Timer? _retry;
 
@@ -639,7 +639,7 @@ class KlausClient extends ChangeNotifier {
   }
 
   static String _ptName(String code) =>
-      const {'pt': 'português', 'en': 'inglês', 'it': 'italiano'}[code] ?? code;
+      const {'pt': 'português', 'en': 'inglês', 'it': 'italiano', 'de': 'alemão'}[code] ?? code;
 
   /// Troca para o Klaus de outro idioma (outro agente, com voz nativa).
   Future<void> switchLanguage(String code, {bool translator = false}) async {

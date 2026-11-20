@@ -15,6 +15,7 @@ const kLangs = <KlausLang>[
   KlausLang('pt', 'Português', '🇧🇷', 'Klaus', 'klaus_'),
   KlausLang('en', 'English', '🇬🇧', 'Klaus English', 'klaus_en_'),
   KlausLang('it', 'Italiano', '🇮🇹', 'Klaus Italiano', 'klaus_it_'),
+  KlausLang('de', 'Deutsch', '🇩🇪', 'Klaus Deutsch', 'klaus_de_'),
 ];
 
 KlausLang langByCode(String code) =>
@@ -41,6 +42,8 @@ String? detectShortSwitch(String spoken) {
     if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
     if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
     if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
+  if (RegExp(r'alema(?!nh)|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
+    if (RegExp(r'alema(?!nh)|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
   }
   return null;
 }
@@ -53,7 +56,8 @@ String? detectLanguageSwitch(String spoken) {
   final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
 
   if (RegExp(r'explic|expliq|tradu|signific|quer dizer|como se diz|como e que se diz|'
-          r'how do you say|what does|explain|translat|spieg|come si dice|cosa vuol|cosa significa')
+          r'how do you say|what does|explain|translat|spieg|come si dice|cosa vuol|cosa significa|'
+          r'wie sagt man|was bedeutet|erklar|ubersetz')
       .hasMatch(t)) {
     return null;
   }
@@ -65,13 +69,15 @@ String? detectLanguageSwitch(String spoken) {
           r'volta|voltar|volte|voltamos|muda|mudar|mude|troca|trocar|troque|passa|passar|'
           r'treina|treinar|treinare|pratica|praticar|estudar|aprender|modo|klaus|claus|'
           r"let's|lets|speak|talk|switch|back|change|practice|train|learn|want|"
-          r'parla|parlare|parliamo|torna|tornare|torniamo|passiamo|cambia|andiamo|vamo|voglio|allenare|esercitare|studiare)')
+          r'parla|parlare|parliamo|torna|tornare|torniamo|passiamo|cambia|andiamo|vamo|voglio|allenare|esercitare|studiare|'
+          r'sprechen|sprich|lernen|uben|ueben|wechseln|zuruck|zurueck|will|mochte|moechte|lass)')
       .hasMatch(t);
   if (!intent) return null;
 
   if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
   if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
   if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
+  if (RegExp(r'alema(?!nh)|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
   return null;
 }
 
@@ -79,15 +85,17 @@ String? detectLanguageSwitch(String spoken) {
 /// Devolve o idioma de destino, ou null se for só uma tradução pontual.
 String? detectTranslatorRequest(String spoken) {
   final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
-  if (!RegExp(r'tradu|translat').hasMatch(t)) return null;
+  if (!RegExp(r'tradu|translat|ubersetz|uebersetz').hasMatch(t)) return null;
   final ongoing = RegExp(r'a partir de agora|daqui (pra|para a|para) frente|modo tradu|tradutor|'
           r'o que eu (falar|disser|digo|for falando)|tudo (o )?que eu|enquanto eu|'
           r'from now on|translator|everything i say|what i say|'
-          r"d'ora in poi|da ora|da adesso|traduttore|tutto quello che dico|quello che dico")
+          r"d'ora in poi|da ora|da adesso|traduttore|tutto quello che dico|quello che dico|"
+          r'ab jetzt|von jetzt an|ubersetzer|alles was ich sage')
       .hasMatch(t);
   if (!ongoing) return null;
   if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
   if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
+  if (RegExp(r'alema(?!nh)|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
   if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
   return null;
 }
@@ -105,6 +113,7 @@ bool detectTranslatorStop(String spoken) {
 /// Bandeira na resposta do Klaus = ele percebeu que você quer outro idioma.
 String? detectFlagSwitch(String text) {
   if (text.contains('🇮🇹')) return 'it';
+  if (text.contains('🇩🇪') || text.contains('🇨🇭') || text.contains('🇦🇹')) return 'de';
   if (text.contains('🇬🇧') || text.contains('🇺🇸')) return 'en';
   if (text.contains('🇧🇷') || text.contains('🇵🇹')) return 'pt';
   return null;
@@ -118,6 +127,7 @@ bool detectFarewell(String spoken) {
     ' vou dormir', ' vou nessa', ' to indo', ' tou indo', ' preciso ir', ' boa noite klaus', ' boa noite claus',
     ' bye', ' goodbye', ' good bye', ' see you', ' good night',
     ' ciao ciao', ' arrivederci', ' a dopo', ' a domani', ' buonanotte',
+    ' tschuss', ' auf wiedersehen', ' bis morgen', ' bis spater', ' gute nacht',
   ];
   return words.any(t.contains);
 }
