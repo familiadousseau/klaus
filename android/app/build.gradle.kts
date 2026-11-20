@@ -44,6 +44,14 @@ android {
         }
     }
 
+    // Código nativo que prepara o áudio para o modelo da palavra "Klaus" (microWakeWord).
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     buildTypes {
         release {
             signingConfig = if (klausKeystore.exists()) signingConfigs.getByName("klaus")

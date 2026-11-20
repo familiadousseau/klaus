@@ -491,7 +491,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ListTile(
             leading: const Icon(Icons.system_update, color: _cyan),
             title: const Text('Procurar atualização', style: TextStyle(color: Colors.white)),
-            subtitle: Text('Versão instalada: ${KlausConfig.buildNumber}',
+            subtitle: Text('Versão instalada: ${KlausConfig.buildNumber} · ouvido: ${klaus.wake.engine}',
                 style: const TextStyle(color: Colors.white54)),
             onTap: () {
               Navigator.pop(ctx);

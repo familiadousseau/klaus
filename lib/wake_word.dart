@@ -7,10 +7,21 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
+import 'micro_wake.dart';
+
 /// Ouve a palavra "Klaus" no próprio telemóvel, sem internet.
 /// Usado enquanto o Klaus dorme, para poupar bateria e dados.
+///
+/// Primeiro tenta o modelo treinado por nós (microWakeWord, o mesmo da placa ESP32).
+/// Se esse falhar, usa o detetor antigo (sherpa-onnx), como até aqui.
 class WakeWordDetector {
   static bool _bindingsReady = false;
+
+  MicroWakeWord? _micro;
+  bool _microFailed = false;
+
+  /// Que detetor está a ouvir (aparece no menu do app).
+  String engine = 'a preparar';
 
   sherpa.KeywordSpotter? _spotter;
   sherpa.OnlineStream? _stream;
@@ -66,19 +77,55 @@ class WakeWordDetector {
     ));
   }
 
+  RecordConfig get _recConfig => const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: 16000,
+        numChannels: 1,
+        noiseSuppress: true,
+        echoCancel: true, // não ouvir a própria voz do Klaus
+      );
+
+  /// Prepara o modelo novo. Devolve false se não der (fica o antigo).
+  Future<bool> _initMicro() async {
+    if (_microFailed) return false;
+    if (_micro != null && _micro!.failed) {
+      _micro!.dispose();
+      _micro = null;
+      _microFailed = true;
+      return false;
+    }
+    _micro ??= MicroWakeWord();
+    if (_micro!.isReady) return true;
+    final ok = await _micro!.init();
+    if (!ok) {
+      _micro = null;
+      _microFailed = true;
+    }
+    return ok;
+  }
+
   /// Começa a ouvir. [onWake] é chamado uma vez quando ouvir "Klaus".
   Future<void> start(void Function() onWake) async {
     if (_running) return;
+    if (await _initMicro()) {
+      final micro = _micro!;
+      engine = 'modelo Klaus (novo)';
+      micro.onWake = () {
+        if (_running) onWake();
+      };
+      micro.reset();
+      final audio = await _rec.startStream(_recConfig);
+      _running = true;
+      _sub = audio.listen((chunk) {
+        if (_running) micro.feed(chunk);
+      });
+      return;
+    }
+    engine = 'sherpa (antigo)';
     await _init();
     _stream?.free();
     _stream = _spotter!.createStream();
-    final audio = await _rec.startStream(const RecordConfig(
-      encoder: AudioEncoder.pcm16bits,
-      sampleRate: 16000,
-      numChannels: 1,
-      noiseSuppress: true,
-      echoCancel: true, // não ouvir a própria voz do Klaus
-    ));
+    final audio = await _rec.startStream(_recConfig);
     _running = true;
     _sub = audio.listen((chunk) {
       if (!_running || _busy || _stream == null) return;
@@ -117,6 +164,8 @@ class WakeWordDetector {
 
   Future<void> dispose() async {
     await stop();
+    _micro?.dispose();
+    _micro = null;
     _stream?.free();
     _stream = null;
     _spotter?.free();

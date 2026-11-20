@@ -26,6 +26,8 @@ dependencies:
   wakelock_plus: ^1.2.8
   path_provider: ^2.1.5
   sherpa_onnx: ^2.0.2
+  tflite_flutter: ^0.11.0
+  ffi: ^2.1.0
 
 dev_dependencies:
   flutter_test:
@@ -37,6 +39,7 @@ flutter:
   assets:
     - assets/emojis/
     - assets/kws/
+    - assets/wakeword/
 
 # Versões do gravador que sabemos que funcionam juntas (as mais novas quebram o record_linux).
 dependency_overrides:
