@@ -30,7 +30,7 @@ class MicCapture {
   void Function(bool active)? onVoiceChange;
 
   /// Sensibilidade: quanto acima do ruído ambiente a voz tem de estar (x vezes).
-  double voiceFactor = 3.0;
+  double voiceFactor = 2.0;
 
   double _noiseFloor = 300; // RMS do ruído ambiente (aprendido)
   int _speechFrames = 0;
@@ -57,7 +57,7 @@ class MicCapture {
     if (_noiseFloor < 60) _noiseFloor = 60;
 
     // Voz: bem acima do ruído, com volume mínimo, e "som de fala" (nem chiado nem zumbido).
-    final loud = rms > _noiseFloor * voiceFactor && rms > 700;
+    final loud = rms > _noiseFloor * voiceFactor && rms > 350;
     final speechLike = zcr > 0.02 && zcr < 0.35;
     if (loud && speechLike) {
       _speechFrames++;

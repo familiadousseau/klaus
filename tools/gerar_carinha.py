@@ -387,11 +387,26 @@ def listening(c, f):
             c.arc(120 + side * 92, EY + 30, r * 0.6, r, a0, a1, col, 4)
 
 
+def sleeping(c, f):
+    # rosto mais escuro, olhos fechados, a respirar devagar, Zzz a subir
+    c.d.rectangle([0, 0, P(W), P(W)], fill=(14, 18, 34))
+    dim = (40, 110, 130)
+    b = 3 * math.sin(2 * math.pi * f / N)
+    for x in (LX, RX):
+        c.arc(x, EY + 2 + b, 18, 8, 20, 160, dim, 7)
+    c.ellipse(120, MY + b, 6, 4, dim)
+    for i in range(3):
+        t = ((f + i * N // 3) % N) / N
+        size = 5 + t * 6
+        col = tuple(int(v * (1 - t * 0.7)) for v in (120, 140, 170))
+        c.text_z(160 + i * 6 + t * 30, 80 - t * 55, size, col)
+
+
 EMOTIONS = dict(neutral=neutral, happy=happy, laughing=laughing, funny=funny, silly=silly,
                 sad=sad, crying=crying, angry=angry, surprised=surprised, shocked=shocked,
                 thinking=thinking, sleepy=sleepy, relaxed=relaxed, loving=loving, kissy=kissy,
                 winking=winking, cool=cool, confident=confident, confused=confused,
-                embarrassed=embarrassed, delicious=delicious, listening=listening)
+                embarrassed=embarrassed, delicious=delicious, listening=listening, sleeping=sleeping)
 
 for name, fn in EMOTIONS.items():
     frames = []

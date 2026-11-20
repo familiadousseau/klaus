@@ -17,7 +17,7 @@ const _pink = Color(0xFFFF6E96);
 const _emotions = {
   'neutral', 'happy', 'laughing', 'funny', 'sad', 'angry', 'crying', 'loving',
   'embarrassed', 'surprised', 'shocked', 'thinking', 'winking', 'cool', 'relaxed',
-  'delicious', 'kissy', 'confident', 'sleepy', 'silly', 'confused', 'listening',
+  'delicious', 'kissy', 'confident', 'sleepy', 'silly', 'confused', 'listening', 'sleeping',
 };
 
 class HomeScreen extends StatefulWidget {
@@ -114,8 +114,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bg,
-      appBar: AppBar(
+      backgroundColor: klaus.sleeping ? Colors.black : _bg,
+      appBar: klaus.sleeping ? null : AppBar(
         backgroundColor: _bg,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -139,11 +139,37 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: SafeArea(
-        child: klaus.state == KlausState.needsActivation
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (_) => klaus.markActivity(),
+          child: klaus.sleeping
+            ? _sleepView()
+            : klaus.state == KlausState.needsActivation
             ? _activationView()
             : klaus.state == KlausState.error
                 ? _errorView()
                 : _mainView(),
+        ),
+      ),
+    );
+  }
+
+  Widget _sleepView() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: klaus.wakeUp,
+      child: Container(
+        color: Colors.black,
+        width: double.infinity,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Opacity(opacity: 0.55, child: _face(size: 220)),
+            const SizedBox(height: 20),
+            const Text('Zzz... diga "Klaus" ou toque para acordar',
+                style: TextStyle(color: Colors.white24, fontSize: 14)),
+          ],
+        ),
       ),
     );
   }
@@ -479,6 +505,14 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () {
               Navigator.pop(ctx);
               launchUrl(Uri.parse(KlausConfig.consoleUrl), mode: LaunchMode.externalApplication);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.bedtime, color: _cyan),
+            title: const Text('Pôr o Klaus a dormir agora', style: TextStyle(color: Colors.white)),
+            onTap: () {
+              Navigator.pop(ctx);
+              klaus.goToSleep();
             },
           ),
           ListTile(

@@ -12,6 +12,7 @@ import 'emotion_engine.dart';
 import 'identity.dart';
 import 'languages.dart';
 import 'ota.dart';
+import 'wake_word.dart';
 
 enum KlausState { starting, needsActivation, connecting, idle, listening, thinking, speaking, error }
 
@@ -50,6 +51,15 @@ class KlausClient extends ChangeNotifier {
   bool _disposed = false;
   bool _manualHolding = false;
   final EmotionEngine _emo = EmotionEngine();
+
+  // ---- Sono ----
+  final WakeWordDetector wake = WakeWordDetector();
+  bool sleeping = false;
+  bool drowsy = false;
+  DateTime _lastActivity = DateTime.now();
+  Timer? _sleepTimer;
+  static const drowsyAfter = Duration(minutes: 2);
+  static const sleepAfter = Duration(minutes: 3);
   String? _serverEmotion;
   Timer? _retry;
 
@@ -86,7 +96,8 @@ class KlausClient extends ChangeNotifier {
   String _idleFace() => 'happy';
 
   void _onVoice(bool active) {
-    if (state != KlausState.listening) return;
+    if (active) markActivity();
+    if (state != KlausState.listening || drowsy) return;
     emotion = active ? 'listening' : _idleFace();
     status = active ? 'A ouvir...' : 'À espera... fale comigo';
     if (!_disposed) notifyListeners();
@@ -94,6 +105,8 @@ class KlausClient extends ChangeNotifier {
 
   Future<void> start() async {
     mic.onVoiceChange = _onVoice;
+    _sleepTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => _checkSleep());
+    markActivity();
     errorText = null;
     _set(KlausState.starting, 'A preparar o Klaus...');
     try {
@@ -200,7 +213,7 @@ class KlausClient extends ChangeNotifier {
         _scheduleReconnect();
       },
       onDone: () {
-        if (_disposed) return;
+        if (_disposed || sleeping) return;
         mic.stop();
         if (state != KlausState.error) _set(KlausState.connecting, 'Ligação fechada, a religar...');
         _scheduleReconnect();
@@ -243,7 +256,7 @@ class KlausClient extends ChangeNotifier {
     if (_disposed) return;
     _retry?.cancel();
     _retry = Timer(const Duration(seconds: 5), () {
-      if (!_disposed && state != KlausState.needsActivation) connect();
+      if (!_disposed && !sleeping && state != KlausState.needsActivation) connect();
     });
   }
 
@@ -320,6 +333,7 @@ class KlausClient extends ChangeNotifier {
   Future<void> _onTts(Map<String, dynamic> data) async {
     switch (data['state']) {
       case 'start':
+        markActivity();
         if (autoMode || textMode) await mic.stop();
         _set(KlausState.speaking, textMode && !textModeVoice ? 'A escrever...' : 'A falar...');
         break;
@@ -359,30 +373,9 @@ class KlausClient extends ChangeNotifier {
       'state': 'start',
       'mode': auto ? 'auto' : 'manual',
     });
-    // No modo contínuo só manda áudio quando há voz (com 300 ms antes e ~1,2 s
-    // depois, para não cortar palavras e o servidor perceber o fim da frase).
-    final preRoll = <Uint8List>[];
-    var postRoll = 0;
     await mic.start((opus) {
       try {
-        if (!auto) {
-          _ws?.sink.add(opus);
-          return;
-        }
-        if (mic.voiceActive) {
-          for (final f in preRoll) {
-            _ws?.sink.add(f);
-          }
-          preRoll.clear();
-          _ws?.sink.add(opus);
-          postRoll = 20;
-        } else if (postRoll > 0) {
-          postRoll--;
-          _ws?.sink.add(opus);
-        } else {
-          preRoll.add(opus);
-          if (preRoll.length > 5) preRoll.removeAt(0);
-        }
+        _ws?.sink.add(opus);
       } catch (_) {}
     });
     // No modo contínuo fica com a cara normal até alguém falar mesmo com ele.
@@ -392,6 +385,7 @@ class KlausClient extends ChangeNotifier {
 
   /// Modo manual: segurar para falar.
   Future<void> pressToTalk() async {
+    markActivity();
     if (state == KlausState.speaking) await abort();
     if (_ws == null) return;
     _manualHolding = true;
@@ -409,6 +403,7 @@ class KlausClient extends ChangeNotifier {
 
   /// Liga/desliga a conversa automática (mãos livres).
   Future<void> toggleAuto() async {
+    markActivity();
     autoMode = !autoMode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('klaus_auto_mode', autoMode);
@@ -437,6 +432,7 @@ class KlausClient extends ChangeNotifier {
 
   /// Envia uma mensagem escrita (como se tivesse sido dita).
   Future<void> sendText(String text) async {
+    markActivity();
     final t = text.trim();
     if (t.isEmpty || _ws == null) return;
     if (state == KlausState.speaking) await abort();
@@ -451,8 +447,80 @@ class KlausClient extends ChangeNotifier {
     _set(KlausState.thinking, 'A pensar...');
   }
 
+  /// Regista que houve interação (adia o sono).
+  void markActivity() {
+    _lastActivity = DateTime.now();
+    if (drowsy && !sleeping) {
+      drowsy = false;
+      if (state == KlausState.listening) {
+        emotion = 'happy';
+        status = 'À espera... fale comigo';
+      }
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  void _checkSleep() {
+    if (_disposed || sleeping || textMode) return;
+    final calm = state == KlausState.idle || state == KlausState.listening;
+    if (!calm) {
+      return;
+    }
+    final idle = DateTime.now().difference(_lastActivity);
+    if (idle >= sleepAfter) {
+      goToSleep();
+    } else if (idle >= drowsyAfter && !drowsy) {
+      drowsy = true;
+      emotion = 'sleepy';
+      status = 'Com sono...';
+      notifyListeners();
+    }
+  }
+
+  /// Adormece: desliga a ligação e o envio de áudio; só fica a ouvir "Klaus".
+  Future<void> goToSleep() async {
+    if (sleeping) return;
+    sleeping = true;
+    drowsy = false;
+    if (mic.isRunning) {
+      _sendJson({'session_id': _sessionId, 'type': 'listen', 'state': 'stop'});
+      await mic.stop();
+    }
+    await speaker.interrupt();
+    await _closeWs();
+    emotion = 'sleeping';
+    _set(KlausState.idle, 'A dormir... diga "Klaus" ou toque no ecrã');
+    try {
+      await wake.start(() => wakeUp());
+    } catch (e) {
+      status = 'A dormir... toque no ecrã para acordar';
+      notifyListeners();
+    }
+  }
+
+  /// Acorda (por "Klaus" ou toque), religa e cumprimenta.
+  Future<void> wakeUp() async {
+    if (!sleeping) return;
+    sleeping = false;
+    await wake.stop();
+    markActivity();
+    emotion = 'surprised';
+    _set(KlausState.connecting, 'A acordar...');
+    await connect();
+    if (_ws != null && !textMode) {
+      // Igual a um aparelho XiaoZhi que ouviu a palavra de ativação: o servidor cumprimenta.
+      _sendJson({
+        'session_id': _sessionId,
+        'type': 'listen',
+        'state': 'detect',
+        'text': 'Klaus',
+      });
+    }
+  }
+
   /// Entra/sai do modo escrito.
   Future<void> setTextMode(bool on) async {
+    markActivity();
     if (textMode == on) return;
     textMode = on;
     if (on) {
@@ -487,6 +555,11 @@ class KlausClient extends ChangeNotifier {
   Future<void> switchLanguage(String code) async {
     final target = langByCode(code);
     if (target.code == lang.code && state != KlausState.error) return;
+    markActivity();
+    if (sleeping) {
+      sleeping = false;
+      await wake.stop();
+    }
     _gen++;
     _activating = false;
     _sendJson({'session_id': _sessionId, 'type': 'abort'});
@@ -525,6 +598,8 @@ class KlausClient extends ChangeNotifier {
     _disposed = true;
     _retry?.cancel();
     _watchdog?.cancel();
+    _sleepTimer?.cancel();
+    wake.dispose();
     _closeWs();
     mic.dispose();
     speaker.release();

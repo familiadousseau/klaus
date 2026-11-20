@@ -29,6 +29,11 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Palavra de ativação "Klaus" (tokens BPE)
+        run: |
+          pip install sentencepiece || true
+          python3 tools/make_keywords.py || echo "::warning::Mantido keywords.txt manual"
+
       - name: Dependências
         run: flutter pub get
 
