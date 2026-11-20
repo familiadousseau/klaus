@@ -39,6 +39,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/emojis/
+    - assets/emojis_pip/
     - assets/kws/
     - assets/wakeword/
 

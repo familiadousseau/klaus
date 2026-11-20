@@ -130,13 +130,22 @@ String? detectFlagSwitch(String text) {
 
 /// Descobre se a frase dita é uma despedida (para o Klaus ir dormir).
 bool detectFarewell(String spoken) {
-  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z0-9 ]+"), ' ')} ';
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z0-9 ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
   const words = [
     ' tchau', ' xau', ' adeus', ' ate logo', ' ate mais', ' ate amanha', ' ate depois',
     ' vou dormir', ' vou nessa', ' to indo', ' tou indo', ' preciso ir', ' boa noite klaus', ' boa noite claus',
     ' bye', ' goodbye', ' good bye', ' see you', ' good night',
     ' ciao ciao', ' arrivederci', ' a dopo', ' a domani', ' buonanotte',
     ' tschuss', ' auf wiedersehen', ' bis morgen', ' bis spater', ' gute nacht',
+    // Descansar / adeus em cada língua (pedido para o Klaus ir dormir)
+    ' descansa', ' descansar', ' descanse', ' vai dormir', ' pode dormir', ' hora de dormir',
+    ' farewell', ' take a rest', ' get some rest', ' have a rest', ' go rest', ' go to sleep', ' time to sleep',
+    ' addio', ' riposa', ' riposati', ' riposare', ' vai a dormire', ' a presto',
+    ' ruh dich aus', ' ruhe dich aus', ' ausruhen', ' geh schlafen', ' schlaf gut', ' lebewohl', ' leb wohl',
+    ' adieu', ' bis bald',
   ];
-  return words.any(t.contains);
+  if (words.any(t.contains)) return true;
+  // Ordem curta: "Klaus, rest!", "dorme", "schlaf!", "dormi"
+  final palavras = t.trim().split(' ').where((w) => w.isNotEmpty).length;
+  return palavras <= 3 && RegExp(r' (rest|sleep|dorme|dormir|dormi|schlaf|schlafen) ').hasMatch(t);
 }

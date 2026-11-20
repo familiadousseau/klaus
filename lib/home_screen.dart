@@ -134,8 +134,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: klaus.sleeping ? Colors.black : _bg,
       body: LayoutBuilder(builder: (ctx, c) {
-        final size = c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight;
-        return Center(child: _face(size: size));
+        final size = c.maxWidth > c.maxHeight ? c.maxWidth : c.maxHeight;
+        // GIF quadrado a ocupar a janela toda (sem cantos de outra cor).
+        return ClipRect(child: OverflowBox(
+          maxWidth: size,
+          maxHeight: size,
+          child: _face(size: size, square: true),
+        ));
       }),
     );
   }
@@ -210,7 +215,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _face({double size = 260}) {
+  Widget _face({double size = 260, bool square = false}) {
+    // square: versão quadrada (cantos preenchidos) para a janelinha flutuante.
+    final dir = square ? 'assets/emojis_pip' : 'assets/emojis';
     final name = _emotions.contains(klaus.emotion) ? klaus.emotion : 'neutral';
     double bounce = 1.0;
     if (klaus.state == KlausState.speaking) bounce = 1.0 + klaus.speakerLevel * 0.08;
@@ -219,12 +226,13 @@ class _HomeScreenState extends State<HomeScreen> {
       scale: bounce,
       duration: const Duration(milliseconds: 80),
       child: Image.asset(
-        'assets/emojis/$name.gif',
+        '$dir/$name.gif',
         width: size,
         height: size,
+        fit: BoxFit.cover,
         gaplessPlayback: true,
         errorBuilder: (_, __, ___) =>
-            Image.asset('assets/emojis/neutral.gif', width: size, height: size),
+            Image.asset('$dir/neutral.gif', width: size, height: size),
       ),
     );
   }
