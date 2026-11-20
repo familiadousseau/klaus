@@ -56,6 +56,7 @@ class KlausClient extends ChangeNotifier {
   final WakeWordDetector wake = WakeWordDetector();
   bool sleeping = false;
   bool _sleepAfterReply = false;
+  DateTime _selfNameUntil = DateTime(2000); // enquanto ele próprio diz "Klaus"
   bool _startAsleep = true; // ao abrir o app, espera ouvir "Klaus"
   Timer? _farewellTimer;
   bool drowsy = false;
@@ -357,6 +358,11 @@ class KlausClient extends ChangeNotifier {
       case 'sentence_start':
         final sentence = data['text']?.toString() ?? '';
         if (sentence.contains('👋')) _armFarewell();
+        // Se a frase que ele vai dizer tem o próprio nome, não se interrompe sozinho.
+        if (RegExp(r'[kc]laus', caseSensitive: false).hasMatch(sentence)) {
+          final ms = 1500 + sentence.length * 90;
+          _selfNameUntil = DateTime.now().add(Duration(milliseconds: ms));
+        }
         _addChat(false, sentence);
         // Carinha frase a frase: o que ele diz manda; a emoção do servidor só
         // vale para a primeira frase da resposta.
@@ -474,6 +480,7 @@ class KlausClient extends ChangeNotifier {
   /// "Klaus" ouvido enquanto ele falava: interrompe e ouve.
   void _bargeIn() {
     if (sleeping) return;
+    if (DateTime.now().isBefore(_selfNameUntil)) return; // foi ele a dizer o nome
     wake.stop();
     markActivity();
     _sleepAfterReply = false;
