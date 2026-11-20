@@ -42,9 +42,10 @@ class MicHub {
   double minRms = 300;
 
   /// Silêncio (em frames de 60 ms) para considerar que a pessoa acabou de falar.
-  int endSilenceFrames = 22; // ~1,3 s
+  int endSilenceFrames = 18; // ~1,1 s
 
   double _noiseFloor = 250;
+  double _speechLevel = 0; // volume médio da sua voz na frase atual
   int _speechFrames = 0;
   int _silenceFrames = 0;
 
@@ -69,13 +70,13 @@ class MicHub {
   void setPause(String s) {
     switch (s) {
       case 'curta':
-        endSilenceFrames = 13; // ~0,8 s
+        endSilenceFrames = 12; // ~0,7 s
         break;
       case 'longa':
-        endSilenceFrames = 34; // ~2 s
+        endSilenceFrames = 28; // ~1,7 s
         break;
       default:
-        endSilenceFrames = 22; // ~1,3 s
+        endSilenceFrames = 18; // ~1,1 s
     }
   }
 
@@ -106,11 +107,19 @@ class MicHub {
       if (_noiseFloor < 50) _noiseFloor = 50;
     }
 
-    // Para começar exige mais; para continuar basta menos (não corta a meio da frase).
-    final factor = voiceActive ? startFactor * 0.55 : startFactor;
-    final minimo = voiceActive ? minRms * 0.5 : minRms;
     final speechLike = zcr > 0.01 && zcr < 0.45;
-    final isSpeech = rms > _noiseFloor * factor && rms > minimo && speechLike;
+    bool isSpeech;
+    if (!voiceActive) {
+      // Para COMEÇAR: bem acima do ruído ambiente e com volume mínimo.
+      isSpeech = rms > _noiseFloor * startFactor && rms > minRms && speechLike;
+      if (isSpeech) _speechLevel = rms;
+    } else {
+      // Para CONTINUAR: o som tem de estar perto do volume da SUA voz.
+      // Quando cai para muito abaixo (ex.: só ruído de fundo), conta como silêncio.
+      final keep = math.max(_noiseFloor * startFactor * 0.8, _speechLevel * 0.22);
+      isSpeech = rms > keep && rms > minRms * 0.6;
+      if (isSpeech) _speechLevel = _speechLevel * 0.9 + rms * 0.1;
+    }
 
     if (isSpeech) {
       _speechFrames++;
@@ -153,7 +162,7 @@ class MicHub {
       numChannels: KlausConfig.channels,
       echoCancel: true, // para ouvir "Klaus" mesmo enquanto ele fala
       noiseSuppress: true,
-      autoGain: true,
+      autoGain: false, // o ganho automático aumentava o ruído depois de parar de falar
     ));
     _running = true;
     _sub = stream.listen((chunk) {

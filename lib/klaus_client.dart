@@ -353,7 +353,7 @@ class KlausClient extends ChangeNotifier {
           if (_segFrames.length > 170) _segFrames.removeAt(0); // máx. ~10 s
         }
         // Segurança: frases muito longas terminam sozinhas.
-        if (!_segForced && DateTime.now().difference(_segStart).inSeconds > 30) {
+        if (!_segForced && DateTime.now().difference(_segStart).inSeconds > 15) {
           _endSegment();
         }
         break;
