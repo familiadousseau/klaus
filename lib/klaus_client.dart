@@ -12,6 +12,7 @@ import 'emotion_engine.dart';
 import 'identity.dart';
 import 'languages.dart';
 import 'ota.dart';
+import 'radio.dart';
 import 'wake_word.dart';
 
 enum KlausState { starting, needsActivation, connecting, idle, listening, thinking, speaking, error }
@@ -54,6 +55,13 @@ class KlausClient extends ChangeNotifier {
 
   // ---- Sono ----
   final WakeWordDetector wake = WakeWordDetector();
+
+  /// Rádio pela internet (a IA chama as ferramentas self.radio.*).
+  final KlausRadio radio = KlausRadio();
+
+  KlausClient() {
+    radio.addListener(notifyListeners);
+  }
   bool sleeping = false;
   bool _sleepAfterReply = false;
   String? _pendingSwitch; // idioma pedido pelo Klaus (bandeira na resposta)
@@ -233,7 +241,7 @@ class KlausClient extends ChangeNotifier {
     _sendJson({
       'type': 'hello',
       'version': 1,
-      'features': {'mcp': false},
+      'features': {'mcp': true}, // ferramentas do aparelho (rádio)
       'transport': 'websocket',
       'audio_params': {
         'format': 'opus',
@@ -359,7 +367,8 @@ class KlausClient extends ChangeNotifier {
       case 'listen':
         break;
       case 'mcp':
-        // Ferramentas do aparelho ainda não usadas no Klaus Android.
+        final payload = data['payload'];
+        if (payload is Map) await _handleMcp(Map<String, dynamic>.from(payload));
         break;
     }
   }
@@ -565,6 +574,7 @@ class KlausClient extends ChangeNotifier {
   Future<void> goToSleep() async {
     if (sleeping) return;
     sleeping = true;
+    unawaited(radio.duck(false)); // a dormir: rádio no volume normal
     _sleepAfterReply = false;
     _farewellTimer?.cancel();
     drowsy = false;
@@ -589,6 +599,7 @@ class KlausClient extends ChangeNotifier {
   Future<void> wakeUp() async {
     if (!sleeping) return;
     sleeping = false;
+    unawaited(radio.duck(true)); // a conversar: rádio baixinho
     await wake.stop();
     markActivity();
     emotion = 'surprised';
@@ -697,6 +708,148 @@ class KlausClient extends ChangeNotifier {
     await start();
   }
 
+  // ---------------------------------------------------------------------------
+  // Ferramentas do aparelho (MCP, como nos aparelhos XiaoZhi oficiais).
+  // O servidor pergunta que ferramentas há (tools/list) e a IA chama-as (tools/call).
+  // ---------------------------------------------------------------------------
+
+  static const List<Map<String, dynamic>> _mcpTools = [
+    {
+      'name': 'self.radio.play',
+      'description': 'Play an internet radio station on the user\'s phone. Use it when the user asks '
+          'for the radio, for a station by name (e.g. "Rádio Comercial", "Antena 1", "BBC Radio 1") '
+          'or for radio of a music style or country. Afterwards say in a few words what is playing.',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'name': {
+            'type': 'string',
+            'description': 'Station name as the user said it, e.g. "Rádio Comercial". Empty if only a style was asked.',
+          },
+          'style': {
+            'type': 'string',
+            'description': 'Music style or topic in English, e.g. "jazz", "rock", "pop", "classical", "news". Optional.',
+          },
+          'country': {
+            'type': 'string',
+            'description': 'Two-letter country code, e.g. "PT", "BR", "IT", "DE", "GB". Optional.',
+          },
+        },
+      },
+    },
+    {
+      'name': 'self.radio.stop',
+      'description': 'Stop the radio that is playing on the user\'s phone.',
+      'inputSchema': {'type': 'object', 'properties': {}},
+    },
+    {
+      'name': 'self.radio.set_volume',
+      'description': 'Set the radio volume on the user\'s phone, from 0 to 100.',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'volume': {'type': 'integer', 'minimum': 0, 'maximum': 100},
+        },
+        'required': ['volume'],
+      },
+    },
+  ];
+
+  Future<void> _handleMcp(Map<String, dynamic> req) async {
+    final id = req['id'];
+    final method = req['method']?.toString();
+    if (method == null || id == null) return; // notificação: não se responde
+    final params = req['params'] is Map ? Map<String, dynamic>.from(req['params'] as Map) : <String, dynamic>{};
+    final modern = params['_meta'] is Map &&
+        (params['_meta'] as Map).containsKey('io.modelcontextprotocol/protocolVersion');
+
+    void reply(Map<String, dynamic> result) {
+      if (modern) result = {'resultType': 'complete', ...result};
+      _sendJson({
+        'session_id': _sessionId,
+        'type': 'mcp',
+        'payload': {'jsonrpc': '2.0', 'id': id, 'result': result},
+      });
+    }
+
+    void error(int code, String message) {
+      _sendJson({
+        'session_id': _sessionId,
+        'type': 'mcp',
+        'payload': {
+          'jsonrpc': '2.0',
+          'id': id,
+          'error': {'code': code, 'message': message},
+        },
+      });
+    }
+
+    switch (method) {
+      case 'initialize':
+        reply({
+          'protocolVersion': '2024-11-05',
+          'capabilities': {'tools': {}},
+          'serverInfo': {'name': 'klaus-android', 'version': '${KlausConfig.buildNumber}'},
+        });
+        break;
+      case 'tools/list':
+        reply({
+          'tools': _mcpTools,
+          if (modern) 'ttlMs': 60000,
+          if (modern) 'cacheScope': 'private',
+        });
+        break;
+      case 'tools/call':
+        final name = params['name']?.toString() ?? '';
+        final args = params['arguments'] is Map
+            ? Map<String, dynamic>.from(params['arguments'] as Map)
+            : <String, dynamic>{};
+        var text = '';
+        var failed = false;
+        try {
+          switch (name) {
+            case 'self.radio.play':
+              text = await radio.play(
+                name: args['name']?.toString(),
+                style: args['style']?.toString(),
+                country: args['country']?.toString(),
+              );
+              failed = !radio.isPlaying;
+              if (radio.isPlaying) {
+                await radio.duck(!sleeping);
+                // Depois de dizer o que está a tocar, o Klaus adormece e a rádio fica no volume normal.
+                _armFarewell();
+              }
+              break;
+            case 'self.radio.stop':
+              await radio.stop();
+              text = 'Rádio parada.';
+              break;
+            case 'self.radio.set_volume':
+              final v = args['volume'];
+              text = await radio.setVolume(v is num ? v.round() : int.tryParse('$v') ?? 50);
+              break;
+            default:
+              error(-32602, 'Unknown tool: $name');
+              return;
+          }
+        } catch (e) {
+          text = 'Erro: $e';
+          failed = true;
+        }
+        reply({
+          'content': [
+            {'type': 'text', 'text': text}
+          ],
+          'isError': failed,
+        });
+        break;
+      default:
+        // Inclui "server/discover": somos um aparelho da versão antiga do protocolo.
+        error(-32601, 'Method not implemented: $method');
+    }
+  }
+
   void _fail(String msg) {
     errorText = msg;
     emotion = 'sad';
@@ -711,6 +864,8 @@ class KlausClient extends ChangeNotifier {
     _sleepTimer?.cancel();
     _farewellTimer?.cancel();
     wake.dispose();
+    radio.removeListener(notifyListeners);
+    radio.dispose();
     _closeWs();
     mic.dispose();
     speaker.release();

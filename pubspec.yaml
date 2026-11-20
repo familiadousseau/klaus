@@ -28,6 +28,7 @@ dependencies:
   sherpa_onnx: ^2.0.2
   tflite_flutter: ^0.11.0
   ffi: ^2.1.0
+  just_audio: ^0.10.4
 
 dev_dependencies:
   flutter_test:

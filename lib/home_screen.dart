@@ -219,6 +219,28 @@ class _HomeScreenState extends State<HomeScreen> {
             }),
           ),
         Text(klaus.status, style: const TextStyle(color: _cyan, fontSize: 16)),
+        // Rádio a tocar: toque para parar.
+        if (klaus.radio.isPlaying)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: GestureDetector(
+              onTap: klaus.radio.stop,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(color: _card, borderRadius: BorderRadius.circular(16)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('📻 ', style: TextStyle(fontSize: 16)),
+                  Flexible(
+                    child: Text(klaus.radio.nowPlaying ?? '',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white70)),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.stop_circle, color: _pink, size: 22),
+                ]),
+              ),
+            ),
+          ),
         const SizedBox(height: 8),
         _langChip(),
         const SizedBox(height: 6),
