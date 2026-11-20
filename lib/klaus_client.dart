@@ -82,7 +82,18 @@ class KlausClient extends ChangeNotifier {
 
   // ---------------- arranque e ativação ----------------
 
+  /// Carinha de "em espera" enquanto o microfone está ligado mas ninguém fala.
+  String _idleFace() => 'happy';
+
+  void _onVoice(bool active) {
+    if (state != KlausState.listening) return;
+    emotion = active ? 'listening' : _idleFace();
+    status = active ? 'A ouvir...' : 'À espera... fale comigo';
+    if (!_disposed) notifyListeners();
+  }
+
   Future<void> start() async {
+    mic.onVoiceChange = _onVoice;
     errorText = null;
     _set(KlausState.starting, 'A preparar o Klaus...');
     try {
@@ -348,13 +359,35 @@ class KlausClient extends ChangeNotifier {
       'state': 'start',
       'mode': auto ? 'auto' : 'manual',
     });
+    // No modo contínuo só manda áudio quando há voz (com 300 ms antes e ~1,2 s
+    // depois, para não cortar palavras e o servidor perceber o fim da frase).
+    final preRoll = <Uint8List>[];
+    var postRoll = 0;
     await mic.start((opus) {
       try {
-        _ws?.sink.add(opus);
+        if (!auto) {
+          _ws?.sink.add(opus);
+          return;
+        }
+        if (mic.voiceActive) {
+          for (final f in preRoll) {
+            _ws?.sink.add(f);
+          }
+          preRoll.clear();
+          _ws?.sink.add(opus);
+          postRoll = 20;
+        } else if (postRoll > 0) {
+          postRoll--;
+          _ws?.sink.add(opus);
+        } else {
+          preRoll.add(opus);
+          if (preRoll.length > 5) preRoll.removeAt(0);
+        }
       } catch (_) {}
     });
-    emotion = 'listening';
-    _set(KlausState.listening, auto ? 'A ouvir...' : 'A ouvir... solte para enviar');
+    // No modo contínuo fica com a cara normal até alguém falar mesmo com ele.
+    emotion = auto ? _idleFace() : 'listening';
+    _set(KlausState.listening, auto ? 'À espera... fale comigo' : 'A ouvir... solte para enviar');
   }
 
   /// Modo manual: segurar para falar.

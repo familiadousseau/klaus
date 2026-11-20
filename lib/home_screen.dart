@@ -152,7 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final name = _emotions.contains(klaus.emotion) ? klaus.emotion : 'neutral';
     double bounce = 1.0;
     if (klaus.state == KlausState.speaking) bounce = 1.0 + klaus.speakerLevel * 0.08;
-    if (klaus.state == KlausState.listening) bounce = 1.0 + klaus.micLevel * 0.05;
+    if (klaus.state == KlausState.listening && klaus.mic.voiceActive) bounce = 1.0 + klaus.micLevel * 0.05;
     return AnimatedScale(
       scale: bounce,
       duration: const Duration(milliseconds: 80),
@@ -213,8 +213,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: klaus.autoMode
                     ? _bigButton(
                         icon: listening ? Icons.graphic_eq : Icons.stop,
-                        label: listening ? 'A ouvir...' : 'Interromper',
-                        color: listening ? _cyan : _card,
+                        label: listening
+                            ? (klaus.mic.voiceActive ? 'A ouvir...' : 'À espera...')
+                            : 'Interromper',
+                        color: listening ? (klaus.mic.voiceActive ? _cyan : _card) : _card,
                         onDown: ready ? klaus.abort : null,
                       )
                     : _bigButton(

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:audio_session/audio_session.dart';
@@ -20,6 +21,58 @@ class MicCapture {
 
   /// Nível do microfone (0..1) para animar a interface.
   double level = 0;
+
+  // ---- Deteção de voz local (distingue ruído de fundo de alguém a falar) ----
+  /// true enquanto parece haver alguém a falar perto do telemóvel.
+  bool voiceActive = false;
+
+  /// Chamado quando [voiceActive] muda.
+  void Function(bool active)? onVoiceChange;
+
+  /// Sensibilidade: quanto acima do ruído ambiente a voz tem de estar (x vezes).
+  double voiceFactor = 3.0;
+
+  double _noiseFloor = 300; // RMS do ruído ambiente (aprendido)
+  int _speechFrames = 0;
+  int _silenceFrames = 0;
+
+  void _updateVad(Int16List pcm) {
+    var sum = 0.0;
+    var crossings = 0;
+    var prev = 0;
+    for (final v in pcm) {
+      sum += v * v;
+      if ((v >= 0) != (prev >= 0)) crossings++;
+      prev = v;
+    }
+    final rms = pcm.isEmpty ? 0.0 : math.sqrt(sum / pcm.length);
+    final zcr = pcm.isEmpty ? 0.0 : crossings / pcm.length;
+
+    // O ruído ambiente desce depressa e sobe devagar (segue os momentos calmos).
+    if (rms < _noiseFloor) {
+      _noiseFloor = _noiseFloor * 0.8 + rms * 0.2;
+    } else {
+      _noiseFloor = _noiseFloor * 0.995 + rms * 0.005;
+    }
+    if (_noiseFloor < 60) _noiseFloor = 60;
+
+    // Voz: bem acima do ruído, com volume mínimo, e "som de fala" (nem chiado nem zumbido).
+    final loud = rms > _noiseFloor * voiceFactor && rms > 700;
+    final speechLike = zcr > 0.02 && zcr < 0.35;
+    if (loud && speechLike) {
+      _speechFrames++;
+      _silenceFrames = 0;
+    } else {
+      _silenceFrames++;
+      if (_silenceFrames > 2) _speechFrames = 0;
+    }
+
+    // Começa após ~180 ms de voz; termina após ~600 ms de silêncio.
+    final wasActive = voiceActive;
+    if (!voiceActive && _speechFrames >= 3) voiceActive = true;
+    if (voiceActive && _silenceFrames >= 10) voiceActive = false;
+    if (voiceActive != wasActive) onVoiceChange?.call(voiceActive);
+  }
 
   bool get isRunning => _running;
 
@@ -61,6 +114,7 @@ class MicCapture {
           if (a > peak) peak = a;
         }
         level = peak / 32768.0;
+        _updateVad(pcm);
         try {
           onFrame(_encoder!.encode(input: pcm));
         } catch (_) {}
@@ -72,6 +126,12 @@ class MicCapture {
     if (!_running) return;
     _running = false;
     level = 0;
+    _speechFrames = 0;
+    _silenceFrames = 0;
+    if (voiceActive) {
+      voiceActive = false;
+      onVoiceChange?.call(false);
+    }
     await _sub?.cancel();
     _sub = null;
     try {
