@@ -57,6 +57,7 @@ class KlausClient extends ChangeNotifier {
   bool sleeping = false;
   bool _sleepAfterReply = false;
   String? _pendingSwitch; // idioma pedido pelo Klaus (bandeira na resposta)
+  bool _translatorOn = false; // modo tradutor bilíngue ligado
   DateTime _selfNameUntil = DateTime(2000); // enquanto ele próprio diz "Klaus"
   bool _startAsleep = true; // ao abrir o app, espera ouvir "Klaus"
   Timer? _farewellTimer;
@@ -311,14 +312,27 @@ class KlausClient extends ChangeNotifier {
         final said = data['text']?.toString() ?? '';
         if (said.trim().length > 1) markActivity(); // frase reconhecida = conversa real
         _addChat(true, said);
-        if (detectFarewell(said)) _armFarewell();
-        final translate = detectTranslatorRequest(said);
-        if (translate != null && translate != lang.code) {
-          // Tradutor com a voz nativa: muda para o Klaus dessa língua em modo tradutor.
-          await switchLanguage(translate, translator: true);
-          return;
+        final stopTranslator = detectTranslatorStop(said);
+        if (stopTranslator) _translatorOn = false;
+        // No modo tradutor as despedidas são para traduzir, não para adormecer.
+        if (!_translatorOn && detectFarewell(said)) _armFarewell();
+        final translate = stopTranslator ? null : detectTranslatorRequest(said);
+        if (translate != null) {
+          if (translate != lang.code && translate != 'pt') {
+            // Tradutor com a voz nativa: muda para o Klaus dessa língua em modo tradutor.
+            await switchLanguage(translate, translator: true);
+            return;
+          }
+          // Tradutor na língua deste agente: o próprio agente trata, o app só regista.
+          _translatorOn = true;
         }
-        final wanted = translate == null ? detectLanguageSwitch(said) : null;
+        // Durante o modo tradutor só o comando curto ("Klaus, português!") troca de agente,
+        // para a fala da outra pessoa ("parliamo italiano") não mudar nada.
+        final wanted = translate != null
+            ? null
+            : _translatorOn
+                ? detectShortSwitch(said)
+                : detectLanguageSwitch(said);
         if (wanted != null && wanted != lang.code) {
           await switchLanguage(wanted);
           return;
@@ -624,6 +638,9 @@ class KlausClient extends ChangeNotifier {
     notifyListeners();
   }
 
+  static String _ptName(String code) =>
+      const {'pt': 'português', 'en': 'inglês', 'it': 'italiano'}[code] ?? code;
+
   /// Troca para o Klaus de outro idioma (outro agente, com voz nativa).
   Future<void> switchLanguage(String code, {bool translator = false}) async {
     _pendingSwitch = null;
@@ -639,6 +656,7 @@ class KlausClient extends ChangeNotifier {
     await speaker.interrupt();
     await _closeWs();
     lang = target;
+    _translatorOn = translator;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('klaus_lang', lang.code);
     emotion = 'thinking';
@@ -654,8 +672,10 @@ class KlausClient extends ChangeNotifier {
           'type': 'listen',
           'state': 'detect',
           'text': translator
-              ? 'Klaus, ativa o modo tradutor: a partir de agora traduz para ${lang.name} '
-                  'tudo o que eu disser em português, só a tradução, até eu dizer "parar tradução".'
+              ? 'Klaus, ativa o MODO TRADUTOR nos dois sentidos: quando eu falar em português, '
+                  'diz a tradução em ${_ptName(lang.code)}; quando a outra pessoa falar em ${_ptName(lang.code)}, '
+                  'diz a tradução em português. Só a tradução, sem comentários, até eu dizer "parar tradução". '
+                  'Confirma em poucas palavras.'
               : lang.code == 'pt'
                   ? 'Klaus, voltei para o português!'
                   : 'Oi Klaus! Vamos treinar ${lang.name}. Começa a aula.',

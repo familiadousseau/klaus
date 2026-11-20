@@ -31,6 +31,20 @@ String _plain(String s) {
   return b.toString().toLowerCase();
 }
 
+/// Comando pré-definido, curto: "Klaus, italiano!" / "Klaus, English!" / "Klaus, português!".
+/// O reconhecimento de voz de qualquer agente escreve bem o nome e a língua.
+/// É o único que funciona durante o modo tradutor.
+String? detectShortSwitch(String spoken) {
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
+  final palavras = t.trim().split(' ').where((w) => w.isNotEmpty).length;
+  if (palavras <= 4 && RegExp(r' (klaus|claus|klas|klaas|clause|close|class|clouse|claws)').hasMatch(t)) {
+    if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
+    if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
+    if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
+  }
+  return null;
+}
+
 /// Descobre se a frase dita pede para trocar de idioma.
 /// Tolerante: dentro do Klaus English/Italiano, o reconhecimento de voz escreve o seu
 /// português "à inglesa/italiana" ("portoghese", "inglese", "treinare"...).
@@ -44,14 +58,8 @@ String? detectLanguageSwitch(String spoken) {
     return null;
   }
 
-  // Comando pré-definido, curto: "Klaus, italiano!" / "Klaus, English!" / "Klaus, português!".
-  // O reconhecimento de voz de qualquer agente escreve bem o nome e a língua.
-  final palavras = t.trim().split(' ').where((w) => w.isNotEmpty).length;
-  if (palavras <= 4 && RegExp(r' (klaus|claus|klas|klaas|clause|close|class|clouse|claws)').hasMatch(t)) {
-    if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
-    if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
-    if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
-  }
+  final curto = detectShortSwitch(spoken);
+  if (curto != null) return curto;
 
   final intent = RegExp(r' (vamos|bora|quero|queria|vou|fala|falar|fale|falamos|conversa|conversar|'
           r'volta|voltar|volte|voltamos|muda|mudar|mude|troca|trocar|troque|passa|passar|'
@@ -82,6 +90,16 @@ String? detectTranslatorRequest(String spoken) {
   if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
   if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
   return null;
+}
+
+/// Pedido para DESLIGAR o modo tradutor ("parar tradução", "stop translation", "basta tradurre").
+bool detectTranslatorStop(String spoken) {
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
+  return RegExp(r' (parar|para|pare|parou|chega|acabou|acaba|fim|sair|sai|desativa|desativar|desliga|desligar|termina|terminar)'
+          r' (a |o |de |da |do |com a |com o )?(modo )?(tradu|traduzir)|'
+          r' stop (the )?translat| end (the )?translat| translator off| stop translator|'
+          r' basta (con la |la )?tradu| smetti di tradurre| ferma (la )?tradu| fine (della )?tradu| esci dalla (modalita )?tradu')
+      .hasMatch(t);
 }
 
 /// Bandeira na resposta do Klaus = ele percebeu que você quer outro idioma.
