@@ -31,22 +31,36 @@ String _plain(String s) {
   return b.toString().toLowerCase();
 }
 
-/// Descobre se a frase dita pede para trocar de idioma. Devolve o código ou null.
+/// Descobre se a frase dita pede EXPLICITAMENTE para trocar de idioma.
+/// "Explica em português" NÃO troca: o professor explica e continua.
 String? detectLanguageSwitch(String spoken) {
-  final t = _plain(spoken);
-  bool any(List<String> w) => w.any(t.contains);
+  final t = _plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ');
 
-  final wantsChange = any([
-    'treinar', 'praticar', 'aprender', 'estudar', 'fala em', 'falar em', 'fala comigo',
-    'fale em', 'fale comigo', 'muda para', 'mudar para', 'troca para', 'trocar para',
-    'vamos de', 'modo', 'voltar', 'volta', 'back to', 'switch to', 'speak',
-    'torna', 'torniamo', 'parla', 'cambia', 'passa a', 'in portoghese',
-  ]);
-  if (!wantsChange) return null;
+  // Pedidos de explicação/tradução ficam no mesmo professor.
+  if (RegExp(r'explic|expliq|tradu|signific|quer dizer|o que e |explain|translat|mean|spieg|cosa vuol').hasMatch(t)) {
+    return null;
+  }
 
-  if (any(['portugues', 'portuguese', 'portoghese'])) return 'pt';
-  if (any(['ingles', 'english', 'inglese'])) return 'en';
-  if (any(['italiano', 'italian'])) return 'it';
+  const targets = {
+    'pt': r'(portugues|portuguese|portoghese)',
+    'en': r'(ingles|english|inglese)',
+    'it': r'(italiano|italian)',
+  };
+  const triggers = [
+    r"(vamos|bora|quero|vou) (treinar|praticar|estudar|aprender|falar|conversar)( um pouco)?( em| o| a| de)? ",
+    r"(treinar|praticar|estudar)( o| a| em)? ",
+    r"(muda|mudar|mude|troca|trocar|troque|passa|passar|vai|ir) (para|pro|pra|ao)( o)?( klaus)? ",
+    r"(volta|voltar|volte|voltamos|retorna|retornar) (ao|para o|pro|pra|para)( klaus)? ",
+    r"(modo|klaus) ",
+    r"(switch|go back|back|change) to ",
+    r"(let's|lets) (practice|practise|speak|train|learn) ",
+    r"(torniamo|torna|tornare|passiamo|passa) (al|all'|a|in) ",
+  ];
+  for (final e in targets.entries) {
+    for (final tr in triggers) {
+      if (RegExp(tr + e.value).hasMatch(t)) return e.key;
+    }
+  }
   return null;
 }
 
@@ -55,9 +69,9 @@ bool detectFarewell(String spoken) {
   final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z0-9 ]+"), ' ')} ';
   const words = [
     ' tchau', ' xau', ' adeus', ' ate logo', ' ate mais', ' ate amanha', ' ate depois',
-    ' fui ', ' vou dormir', ' boa noite klaus', ' boa noite claus',
+    ' vou dormir', ' vou nessa', ' to indo', ' tou indo', ' preciso ir', ' boa noite klaus', ' boa noite claus',
     ' bye', ' goodbye', ' good bye', ' see you', ' good night',
-    ' ciao', ' arrivederci', ' a dopo', ' a domani', ' buonanotte',
+    ' ciao ciao', ' arrivederci', ' a dopo', ' a domani', ' buonanotte',
   ];
   return words.any(t.contains);
 }

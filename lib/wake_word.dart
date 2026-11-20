@@ -77,6 +77,7 @@ class WakeWordDetector {
       sampleRate: 16000,
       numChannels: 1,
       noiseSuppress: true,
+      echoCancel: true, // não ouvir a própria voz do Klaus
     ));
     _running = true;
     _sub = audio.listen((chunk) {

@@ -56,6 +56,7 @@ class KlausClient extends ChangeNotifier {
   final WakeWordDetector wake = WakeWordDetector();
   bool sleeping = false;
   bool _sleepAfterReply = false;
+  bool _startAsleep = true; // ao abrir o app, espera ouvir "Klaus"
   Timer? _farewellTimer;
   bool drowsy = false;
   DateTime _lastActivity = DateTime.now();
@@ -98,7 +99,6 @@ class KlausClient extends ChangeNotifier {
   String _idleFace() => 'happy';
 
   void _onVoice(bool active) {
-    if (active) markActivity();
     if (state != KlausState.listening || drowsy) return;
     emotion = active ? 'listening' : _idleFace();
     status = active ? 'A ouvir...' : 'À espera... fale comigo';
@@ -140,6 +140,11 @@ class KlausClient extends ChangeNotifier {
       return;
     }
     activationCode = null;
+    if (_startAsleep) {
+      _startAsleep = false;
+      await goToSleep();
+      return;
+    }
     await connect();
   }
 
@@ -302,6 +307,7 @@ class KlausClient extends ChangeNotifier {
         break;
       case 'stt':
         final said = data['text']?.toString() ?? '';
+        if (said.trim().length > 1) markActivity(); // frase reconhecida = conversa real
         _addChat(true, said);
         if (detectFarewell(said)) _armFarewell();
         final wanted = detectLanguageSwitch(said);
@@ -340,6 +346,12 @@ class KlausClient extends ChangeNotifier {
       case 'start':
         markActivity();
         if (autoMode || textMode) await mic.stop();
+        if (!textMode) {
+          // Enquanto fala, se ouvir "Klaus" cala-se e passa a ouvir.
+          try {
+            await wake.start(_bargeIn);
+          } catch (_) {}
+        }
         _set(KlausState.speaking, textMode && !textModeVoice ? 'A escrever...' : 'A falar...');
         break;
       case 'sentence_start':
@@ -354,6 +366,7 @@ class KlausClient extends ChangeNotifier {
         break;
       case 'stop':
         await speaker.drain();
+        await wake.stop();
         if (_disposed) return;
         _serverEmotion = null;
         emotion = 'neutral';
@@ -429,6 +442,7 @@ class KlausClient extends ChangeNotifier {
   }
 
   Future<void> abort() async {
+    if (!sleeping) await wake.stop();
     _sendJson({'session_id': _sessionId, 'type': 'abort'});
     await speaker.interrupt();
     if (textMode) {
@@ -455,6 +469,15 @@ class KlausClient extends ChangeNotifier {
     });
     emotion = 'thinking';
     _set(KlausState.thinking, 'A pensar...');
+  }
+
+  /// "Klaus" ouvido enquanto ele falava: interrompe e ouve.
+  void _bargeIn() {
+    if (sleeping) return;
+    wake.stop();
+    markActivity();
+    _sleepAfterReply = false;
+    abort();
   }
 
   /// Despedida percebida: o Klaus termina a resposta e adormece.
@@ -509,6 +532,7 @@ class KlausClient extends ChangeNotifier {
       await mic.stop();
     }
     await speaker.interrupt();
+    await wake.stop();
     await _closeWs();
     emotion = 'sleeping';
     _set(KlausState.idle, 'A dormir... chame "Klaus"');
@@ -578,10 +602,8 @@ class KlausClient extends ChangeNotifier {
     final target = langByCode(code);
     if (target.code == lang.code && state != KlausState.error) return;
     markActivity();
-    if (sleeping) {
-      sleeping = false;
-      await wake.stop();
-    }
+    if (sleeping) sleeping = false;
+    await wake.stop();
     _gen++;
     _activating = false;
     _sendJson({'session_id': _sessionId, 'type': 'abort'});
@@ -595,7 +617,19 @@ class KlausClient extends ChangeNotifier {
     _set(KlausState.connecting, 'A mudar para ${lang.name} ${lang.flag}...');
     try {
       identity = await DeviceIdentity.load(lang.prefix);
+      _startAsleep = false;
       await _runOta();
+      if (_ws != null && !textMode) {
+        // Começa logo a aula (ou o regresso) no idioma novo.
+        _sendJson({
+          'session_id': _sessionId,
+          'type': 'listen',
+          'state': 'detect',
+          'text': lang.code == 'pt'
+              ? 'Klaus, voltei para o português!'
+              : 'Oi Klaus! Vamos treinar ${lang.name}. Começa a aula.',
+        });
+      }
     } catch (e) {
       _fail('Não consegui mudar de idioma: $e');
     }
