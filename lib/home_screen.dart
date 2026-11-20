@@ -17,7 +17,7 @@ const _pink = Color(0xFFFF6E96);
 const _emotions = {
   'neutral', 'happy', 'laughing', 'funny', 'sad', 'angry', 'crying', 'loving',
   'embarrassed', 'surprised', 'shocked', 'thinking', 'winking', 'cool', 'relaxed',
-  'delicious', 'kissy', 'confident', 'sleepy', 'silly', 'confused',
+  'delicious', 'kissy', 'confident', 'sleepy', 'silly', 'confused', 'listening',
 };
 
 class HomeScreen extends StatefulWidget {

@@ -8,6 +8,7 @@ import 'package:web_socket_channel/io.dart';
 
 import 'audio.dart';
 import 'config.dart';
+import 'emotion_engine.dart';
 import 'identity.dart';
 import 'languages.dart';
 import 'ota.dart';
@@ -48,6 +49,8 @@ class KlausClient extends ChangeNotifier {
   bool _activating = false;
   bool _disposed = false;
   bool _manualHolding = false;
+  final EmotionEngine _emo = EmotionEngine();
+  String? _serverEmotion;
   Timer? _retry;
 
   double get micLevel => mic.level;
@@ -213,7 +216,7 @@ class KlausClient extends ChangeNotifier {
       _scheduleReconnect();
       return;
     }
-    emotion = 'happy';
+    emotion = 'happy'; // cumprimento ao ligar
     final prefs = await SharedPreferences.getInstance();
     autoMode = prefs.getBool('klaus_auto_mode') ?? true;
     if (textMode) {
@@ -284,9 +287,11 @@ class KlausClient extends ChangeNotifier {
         notifyListeners();
         break;
       case 'llm':
+        // O servidor só manda informação útil quando não é "feliz"/"neutro".
         final e = data['emotion']?.toString();
-        if (e != null && e.isNotEmpty) {
-          emotion = e;
+        if (EmotionEngine.isInformative(e)) {
+          _serverEmotion = e;
+          emotion = e!;
           notifyListeners();
         }
         break;
@@ -308,11 +313,19 @@ class KlausClient extends ChangeNotifier {
         _set(KlausState.speaking, textMode && !textModeVoice ? 'A escrever...' : 'A falar...');
         break;
       case 'sentence_start':
-        _addChat(false, data['text']?.toString() ?? '');
+        final sentence = data['text']?.toString() ?? '';
+        _addChat(false, sentence);
+        // Carinha frase a frase: o que ele diz manda; a emoção do servidor só
+        // vale para a primeira frase da resposta.
+        emotion = _serverEmotion ?? _emo.forSentence(sentence);
+        _serverEmotion = null;
+        notifyListeners();
         break;
       case 'stop':
         await speaker.drain();
         if (_disposed) return;
+        _serverEmotion = null;
+        emotion = 'neutral';
         if (textMode) {
           _set(KlausState.idle, 'Modo escrito');
         } else if (autoMode) {
@@ -340,7 +353,8 @@ class KlausClient extends ChangeNotifier {
         _ws?.sink.add(opus);
       } catch (_) {}
     });
-    _set(KlausState.listening, auto ? 'A ouvir (automático)...' : 'A ouvir... solte para enviar');
+    emotion = 'listening';
+    _set(KlausState.listening, auto ? 'A ouvir...' : 'A ouvir... solte para enviar');
   }
 
   /// Modo manual: segurar para falar.
@@ -356,6 +370,7 @@ class KlausClient extends ChangeNotifier {
     _manualHolding = false;
     await mic.stop();
     _sendJson({'session_id': _sessionId, 'type': 'listen', 'state': 'stop'});
+    emotion = 'thinking';
     _set(KlausState.thinking, 'A pensar...');
   }
 
@@ -399,6 +414,7 @@ class KlausClient extends ChangeNotifier {
       'state': 'detect',
       'text': t,
     });
+    emotion = 'thinking';
     _set(KlausState.thinking, 'A pensar...');
   }
 

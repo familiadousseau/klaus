@@ -370,11 +370,28 @@ def delicious(c, f):
     c.rrect(120 + 14 * t, MY + 4, 18, 16, BLUSH, r=9)
 
 
+def listening(c, f):
+    # olhos atentos, um pouco maiores e a olhar para cima
+    g = 1 + 0.05 * math.sin(2 * math.pi * f / N)
+    for x in (LX, RX):
+        c.rrect(x, EY - 4, 38 * g, 52 * g * blink_scale(f, at=20), EYE, r=16)
+        c.ellipse(x + 6, EY - 14, 5, 5, WHITE)          # brilho no olho
+    c.ellipse(120, MY, 7, 6, MOUTH)                       # boquinha atenta
+    # ondas de som a chegar (dos dois lados)
+    t = (f % (N // 2)) / (N // 2)
+    for side in (-1, 1):
+        for k in range(2):
+            r = 14 + ((t + k * 0.5) % 1) * 22
+            a0, a1 = (150, 210) if side < 0 else (-30, 30)
+            col = tuple(int(EYE[i] * (1 - ((t + k * 0.5) % 1)) + FACE0[i] * ((t + k * 0.5) % 1)) for i in range(3))
+            c.arc(120 + side * 92, EY + 30, r * 0.6, r, a0, a1, col, 4)
+
+
 EMOTIONS = dict(neutral=neutral, happy=happy, laughing=laughing, funny=funny, silly=silly,
                 sad=sad, crying=crying, angry=angry, surprised=surprised, shocked=shocked,
                 thinking=thinking, sleepy=sleepy, relaxed=relaxed, loving=loving, kissy=kissy,
                 winking=winking, cool=cool, confident=confident, confused=confused,
-                embarrassed=embarrassed, delicious=delicious)
+                embarrassed=embarrassed, delicious=delicious, listening=listening)
 
 for name, fn in EMOTIONS.items():
     frames = []
