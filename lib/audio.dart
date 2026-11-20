@@ -11,117 +11,55 @@ import 'package:record/record.dart';
 
 import 'config.dart';
 
-/// Microfone único do app: um só gravador, sempre ligado enquanto o Klaus está ativo.
-/// Entrega frames PCM de 60 ms (960 amostras a 16 kHz) e faz a deteção de voz local.
-/// Assim não se perde áudio ao passar de "à espera de Klaus" para "a conversar".
-class MicHub {
+/// Microfone: grava PCM 16 kHz e entrega frames Opus de 60 ms.
+class MicCapture {
   final AudioRecorder _rec = AudioRecorder();
   SimpleOpusEncoder? _encoder;
   StreamSubscription<Uint8List>? _sub;
   final List<int> _pending = [];
   bool _running = false;
 
-  /// Recebe cada frame PCM de 60 ms.
-  void Function(Int16List pcm)? onFrame;
-
-  /// Chamado quando a deteção de voz muda (true = alguém começou a falar).
-  void Function(bool active)? onVoiceChange;
-
   /// Nível do microfone (0..1) para animar a interface.
   double level = 0;
 
-  bool get isRunning => _running;
-
-  // ---- Deteção de voz local ----
+  // ---- Deteção de voz local (distingue ruído de fundo de alguém a falar) ----
+  /// true enquanto parece haver alguém a falar perto do telemóvel.
   bool voiceActive = false;
 
-  /// Quanto acima do ruído ambiente a voz tem de estar para COMEÇAR (x vezes).
-  double startFactor = 2.0;
+  /// Chamado quando [voiceActive] muda.
+  void Function(bool active)? onVoiceChange;
 
-  /// Volume mínimo (RMS) para contar como voz.
-  double minRms = 300;
+  /// Sensibilidade: quanto acima do ruído ambiente a voz tem de estar (x vezes).
+  double voiceFactor = 2.0;
 
-  /// Silêncio (em frames de 60 ms) para considerar que a pessoa acabou de falar.
-  int endSilenceFrames = 18; // ~1,1 s
-
-  double _noiseFloor = 250;
-  double _speechLevel = 0; // volume médio da sua voz na frase atual
+  double _noiseFloor = 300; // RMS do ruído ambiente (aprendido)
   int _speechFrames = 0;
   int _silenceFrames = 0;
-
-  /// Sensibilidade do microfone: 'alta', 'normal' ou 'baixa'.
-  void setSensitivity(String s) {
-    switch (s) {
-      case 'alta':
-        startFactor = 1.6;
-        minRms = 180;
-        break;
-      case 'baixa':
-        startFactor = 2.8;
-        minRms = 500;
-        break;
-      default:
-        startFactor = 2.0;
-        minRms = 300;
-    }
-  }
-
-  /// Pausa antes de responder: 'curta', 'normal' ou 'longa'.
-  void setPause(String s) {
-    switch (s) {
-      case 'curta':
-        endSilenceFrames = 12; // ~0,7 s
-        break;
-      case 'longa':
-        endSilenceFrames = 28; // ~1,7 s
-        break;
-      default:
-        endSilenceFrames = 18; // ~1,1 s
-    }
-  }
 
   void _updateVad(Int16List pcm) {
     var sum = 0.0;
     var crossings = 0;
     var prev = 0;
-    var peak = 0;
     for (final v in pcm) {
       sum += v * v;
       if ((v >= 0) != (prev >= 0)) crossings++;
       prev = v;
-      final a = v < 0 ? -v : v;
-      if (a > peak) peak = a;
     }
-    level = peak / 32768.0;
     final rms = pcm.isEmpty ? 0.0 : math.sqrt(sum / pcm.length);
     final zcr = pcm.isEmpty ? 0.0 : crossings / pcm.length;
 
-    // O ruído ambiente só é aprendido quando NINGUÉM está a falar
-    // (antes subia durante a fala e o Klaus ficava surdo).
-    if (!voiceActive) {
-      if (rms < _noiseFloor) {
-        _noiseFloor = _noiseFloor * 0.85 + rms * 0.15;
-      } else {
-        _noiseFloor = _noiseFloor * 0.99 + rms * 0.01;
-      }
-      if (_noiseFloor < 50) _noiseFloor = 50;
-    }
-
-    final speechLike = zcr > 0.01 && zcr < 0.45;
-    bool isSpeech;
-    if (!voiceActive) {
-      // Para COMEÇAR: bem acima do ruído ambiente e com volume mínimo.
-      isSpeech = rms > _noiseFloor * startFactor && rms > minRms && speechLike;
-      if (isSpeech) _speechLevel = rms;
+    // O ruído ambiente desce depressa e sobe devagar (segue os momentos calmos).
+    if (rms < _noiseFloor) {
+      _noiseFloor = _noiseFloor * 0.8 + rms * 0.2;
     } else {
-      // Para CONTINUAR: o som tem de estar perto do volume da SUA voz.
-      // Quando cai para muito abaixo (ex.: só ruído de fundo), conta como silêncio.
-      final keep = math.max(_noiseFloor * startFactor * 0.8, _speechLevel * 0.22);
-      isSpeech = rms > keep && rms > minRms * 0.6;
-      if (isSpeech) _speechLevel = _speechLevel * 0.9 + rms * 0.1;
+      _noiseFloor = _noiseFloor * 0.995 + rms * 0.005;
     }
+    if (_noiseFloor < 60) _noiseFloor = 60;
 
-    if (isSpeech) {
+    // Voz: bem acima do ruído, com volume mínimo, e "som de fala" (nem chiado nem zumbido).
+    final loud = rms > _noiseFloor * voiceFactor && rms > 350;
+    final speechLike = zcr > 0.02 && zcr < 0.35;
+    if (loud && speechLike) {
       _speechFrames++;
       _silenceFrames = 0;
     } else {
@@ -129,40 +67,38 @@ class MicHub {
       if (_silenceFrames > 2) _speechFrames = 0;
     }
 
-    final was = voiceActive;
-    if (!voiceActive && _speechFrames >= 3) voiceActive = true; // ~180 ms de voz
-    if (voiceActive && _silenceFrames >= endSilenceFrames) voiceActive = false;
-    if (voiceActive != was) onVoiceChange?.call(voiceActive);
+    // Começa após ~180 ms de voz; termina após ~600 ms de silêncio.
+    final wasActive = voiceActive;
+    if (!voiceActive && _speechFrames >= 3) voiceActive = true;
+    if (voiceActive && _silenceFrames >= 10) voiceActive = false;
+    if (voiceActive != wasActive) onVoiceChange?.call(voiceActive);
   }
+
+  bool get isRunning => _running;
+
+  static int get _samplesPerFrame =>
+      KlausConfig.inputSampleRate * KlausConfig.frameDurationMs ~/ 1000;
 
   static Future<bool> ensurePermission() async {
     final st = await Permission.microphone.request();
     return st.isGranted;
   }
 
-  static int get _samplesPerFrame =>
-      KlausConfig.inputSampleRate * KlausConfig.frameDurationMs ~/ 1000;
-
-  /// Codifica um frame PCM em Opus (para enviar ao servidor).
-  Uint8List encode(Int16List pcm) {
+  Future<void> start(void Function(Uint8List opus) onFrame) async {
+    if (_running) return;
     _encoder ??= SimpleOpusEncoder(
       sampleRate: KlausConfig.inputSampleRate,
       channels: KlausConfig.channels,
       application: Application.voip,
     );
-    return _encoder!.encode(input: pcm);
-  }
-
-  Future<void> start() async {
-    if (_running) return;
     _pending.clear();
     final stream = await _rec.startStream(const RecordConfig(
       encoder: AudioEncoder.pcm16bits,
       sampleRate: KlausConfig.inputSampleRate,
       numChannels: KlausConfig.channels,
-      echoCancel: true, // para ouvir "Klaus" mesmo enquanto ele fala
+      echoCancel: true,
       noiseSuppress: true,
-      autoGain: false, // o ganho automático aumentava o ruído depois de parar de falar
+      autoGain: true,
     ));
     _running = true;
     _sub = stream.listen((chunk) {
@@ -172,9 +108,15 @@ class MicHub {
         final bytes = Uint8List.fromList(_pending.sublist(0, frameBytes));
         _pending.removeRange(0, frameBytes);
         final pcm = bytes.buffer.asInt16List();
+        var peak = 0;
+        for (final s in pcm) {
+          final a = s < 0 ? -s : s;
+          if (a > peak) peak = a;
+        }
+        level = peak / 32768.0;
         _updateVad(pcm);
         try {
-          onFrame?.call(pcm);
+          onFrame(_encoder!.encode(input: pcm));
         } catch (_) {}
       }
     });
