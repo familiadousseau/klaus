@@ -3,6 +3,9 @@ name: Compilar Klaus (APK)
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'tools/**'
+      - '**.md'
   workflow_dispatch:
 
 permissions:
