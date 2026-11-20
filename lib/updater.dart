@@ -29,8 +29,9 @@ class Updater {
     final assets = data['assets'];
     if (assets is List) {
       for (final a in assets) {
-        if (a is Map && (a['name']?.toString() ?? '').endsWith('.apk')) {
-          apk = a['browser_download_url']?.toString();
+        final name = a is Map ? (a['name']?.toString() ?? '') : '';
+        if (name.endsWith('.apk') && !name.contains('antigo')) {
+          apk = (a as Map)['browser_download_url']?.toString();
           break;
         }
       }
