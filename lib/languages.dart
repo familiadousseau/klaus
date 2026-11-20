@@ -81,6 +81,15 @@ String? detectLanguageSwitch(String spoken) {
   return null;
 }
 
+/// A frase pede treino/aula ("vamos treinar italiano", "quero praticar inglês", "Deutsch lernen")?
+/// Só aí o Klaus da outra língua começa em modo aula; senão só cumprimenta.
+bool detectLessonRequest(String spoken) {
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
+  return RegExp(r'trein|pratic|aula|estud|aprend|exercit|allena|eserci|studia|impar|lezion|'
+          r'practi|train|learn|lesson| lern| uben| ueben|unterricht')
+      .hasMatch(t);
+}
+
 /// Pedido de MODO TRADUTOR ("a partir de agora traduz para italiano o que eu falar").
 /// Devolve o idioma de destino, ou null se for só uma tradução pontual.
 String? detectTranslatorRequest(String spoken) {

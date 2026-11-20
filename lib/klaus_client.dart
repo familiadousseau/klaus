@@ -334,7 +334,7 @@ class KlausClient extends ChangeNotifier {
                 ? detectShortSwitch(said)
                 : detectLanguageSwitch(said);
         if (wanted != null && wanted != lang.code) {
-          await switchLanguage(wanted);
+          await switchLanguage(wanted, lesson: detectLessonRequest(said));
           return;
         }
         _set(KlausState.thinking, 'A pensar...');
@@ -642,7 +642,7 @@ class KlausClient extends ChangeNotifier {
       const {'pt': 'português', 'en': 'inglês', 'it': 'italiano', 'de': 'alemão'}[code] ?? code;
 
   /// Troca para o Klaus de outro idioma (outro agente, com voz nativa).
-  Future<void> switchLanguage(String code, {bool translator = false}) async {
+  Future<void> switchLanguage(String code, {bool translator = false, bool lesson = false}) async {
     _pendingSwitch = null;
     final target = langByCode(code);
     if (target.code == lang.code && state != KlausState.error) return;
@@ -678,7 +678,10 @@ class KlausClient extends ChangeNotifier {
                   'Confirma em poucas palavras.'
               : lang.code == 'pt'
                   ? 'Klaus, voltei para o português!'
-                  : 'Oi Klaus! Vamos treinar ${lang.name}. Começa a aula.',
+                  // Só pede aula se a pessoa pediu treino; senão é conversa normal.
+                  : lesson
+                      ? 'Oi Klaus! Vamos treinar línguas. Começa a aula.'
+                      : 'Oi Klaus! Tudo bem?',
         });
       }
     } catch (e) {
