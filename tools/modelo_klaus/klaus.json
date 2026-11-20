@@ -1,0 +1,23 @@
+{
+  "type": "micro",
+  "wake_word": "Klaus",
+  "author": "Renan",
+  "website": "https://github.com/familiadousseau/klaus",
+  "model": "klaus.tflite",
+  "trained_languages": [
+    "pt",
+    "it",
+    "de",
+    "es",
+    "fr",
+    "en"
+  ],
+  "version": 2,
+  "micro": {
+    "probability_cutoff": 0.93,
+    "feature_step_size": 10,
+    "sliding_window_size": 5,
+    "tensor_arena_size": 30000,
+    "minimum_esphome_version": "2024.7.0"
+  }
+}
