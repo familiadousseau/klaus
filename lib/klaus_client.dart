@@ -56,6 +56,7 @@ class KlausClient extends ChangeNotifier {
   final WakeWordDetector wake = WakeWordDetector();
   bool sleeping = false;
   bool _sleepAfterReply = false;
+  String? _pendingSwitch; // idioma pedido pelo Klaus (bandeira na resposta)
   DateTime _selfNameUntil = DateTime(2000); // enquanto ele próprio diz "Klaus"
   bool _startAsleep = true; // ao abrir o app, espera ouvir "Klaus"
   Timer? _farewellTimer;
@@ -311,7 +312,13 @@ class KlausClient extends ChangeNotifier {
         if (said.trim().length > 1) markActivity(); // frase reconhecida = conversa real
         _addChat(true, said);
         if (detectFarewell(said)) _armFarewell();
-        final wanted = detectLanguageSwitch(said);
+        final translate = detectTranslatorRequest(said);
+        if (translate != null && translate != lang.code) {
+          // Tradutor com a voz nativa: muda para o Klaus dessa língua em modo tradutor.
+          await switchLanguage(translate, translator: true);
+          return;
+        }
+        final wanted = translate == null ? detectLanguageSwitch(said) : null;
         if (wanted != null && wanted != lang.code) {
           await switchLanguage(wanted);
           return;
@@ -323,6 +330,7 @@ class KlausClient extends ChangeNotifier {
       case 'llm':
         // 👋 = a IA percebeu que é uma despedida (combinado na personalidade).
         if ((data['text']?.toString() ?? '').contains('👋')) _armFarewell();
+        _checkFlag(data['text']?.toString() ?? '');
         // O servidor só manda informação útil quando não é "feliz"/"neutro".
         final e = data['emotion']?.toString();
         if (EmotionEngine.isInformative(e)) {
@@ -358,6 +366,7 @@ class KlausClient extends ChangeNotifier {
       case 'sentence_start':
         final sentence = data['text']?.toString() ?? '';
         if (sentence.contains('👋')) _armFarewell();
+        _checkFlag(sentence);
         // Se a frase que ele vai dizer tem o próprio nome, não se interrompe sozinho.
         if (RegExp(r'[kc]laus', caseSensitive: false).hasMatch(sentence)) {
           final ms = 1500 + sentence.length * 90;
@@ -376,6 +385,12 @@ class KlausClient extends ChangeNotifier {
         if (_disposed) return;
         _serverEmotion = null;
         emotion = 'neutral';
+        if (_pendingSwitch != null && !_sleepAfterReply) {
+          final code = _pendingSwitch!;
+          _pendingSwitch = null;
+          await switchLanguage(code);
+          return;
+        }
         if (_sleepAfterReply) {
           await goToSleep();
           return;
@@ -488,6 +503,11 @@ class KlausClient extends ChangeNotifier {
   }
 
   /// Despedida percebida: o Klaus termina a resposta e adormece.
+  void _checkFlag(String text) {
+    final code = detectFlagSwitch(text);
+    if (code != null && code != lang.code) _pendingSwitch = code;
+  }
+
   void _armFarewell() {
     if (_sleepAfterReply || sleeping) return;
     _sleepAfterReply = true;
@@ -605,7 +625,8 @@ class KlausClient extends ChangeNotifier {
   }
 
   /// Troca para o Klaus de outro idioma (outro agente, com voz nativa).
-  Future<void> switchLanguage(String code) async {
+  Future<void> switchLanguage(String code, {bool translator = false}) async {
+    _pendingSwitch = null;
     final target = langByCode(code);
     if (target.code == lang.code && state != KlausState.error) return;
     markActivity();
@@ -632,9 +653,12 @@ class KlausClient extends ChangeNotifier {
           'session_id': _sessionId,
           'type': 'listen',
           'state': 'detect',
-          'text': lang.code == 'pt'
-              ? 'Klaus, voltei para o português!'
-              : 'Oi Klaus! Vamos treinar ${lang.name}. Começa a aula.',
+          'text': translator
+              ? 'Klaus, ativa o modo tradutor: a partir de agora traduz para ${lang.name} '
+                  'tudo o que eu disser em português, só a tradução, até eu dizer "parar tradução".'
+              : lang.code == 'pt'
+                  ? 'Klaus, voltei para o português!'
+                  : 'Oi Klaus! Vamos treinar ${lang.name}. Começa a aula.',
         });
       }
     } catch (e) {

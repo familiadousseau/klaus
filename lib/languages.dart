@@ -31,36 +31,55 @@ String _plain(String s) {
   return b.toString().toLowerCase();
 }
 
-/// Descobre se a frase dita pede EXPLICITAMENTE para trocar de idioma.
-/// "Explica em português" NÃO troca: o professor explica e continua.
+/// Descobre se a frase dita pede para trocar de idioma.
+/// Tolerante: dentro do Klaus English/Italiano, o reconhecimento de voz escreve o seu
+/// português "à inglesa/italiana" ("portoghese", "inglese", "treinare"...).
+/// Pedidos de explicação/tradução pontual NÃO trocam: o professor explica e continua.
 String? detectLanguageSwitch(String spoken) {
-  final t = _plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ');
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
 
-  // Pedidos de explicação/tradução ficam no mesmo professor.
-  if (RegExp(r'explic|expliq|tradu|signific|quer dizer|o que e |explain|translat|mean|spieg|cosa vuol').hasMatch(t)) {
+  if (RegExp(r'explic|expliq|tradu|signific|quer dizer|como se diz|como e que se diz|'
+          r'how do you say|what does|explain|translat|spieg|come si dice|cosa vuol|cosa significa')
+      .hasMatch(t)) {
     return null;
   }
 
-  const targets = {
-    'pt': r'(portugues|portuguese|portoghese)',
-    'en': r'(ingles|english|inglese)',
-    'it': r'(italiano|italian)',
-  };
-  const triggers = [
-    r"(vamos|bora|quero|vou) (treinar|praticar|estudar|aprender|falar|conversar)( um pouco)?( em| o| a| de)? ",
-    r"(treinar|praticar|estudar)( o| a| em)? ",
-    r"(muda|mudar|mude|troca|trocar|troque|passa|passar|vai|ir) (para|pro|pra|ao)( o)?( klaus)? ",
-    r"(volta|voltar|volte|voltamos|retorna|retornar) (ao|para o|pro|pra|para)( klaus)? ",
-    r"(modo|klaus) ",
-    r"(switch|go back|back|change) to ",
-    r"(let's|lets) (practice|practise|speak|train|learn) ",
-    r"(torniamo|torna|tornare|passiamo|passa) (al|all'|a|in) ",
-  ];
-  for (final e in targets.entries) {
-    for (final tr in triggers) {
-      if (RegExp(tr + e.value).hasMatch(t)) return e.key;
-    }
-  }
+  final intent = RegExp(r' (vamos|bora|quero|queria|vou|fala|falar|fale|falamos|conversa|conversar|'
+          r'volta|voltar|volte|voltamos|muda|mudar|mude|troca|trocar|troque|passa|passar|'
+          r'treina|treinar|treinare|pratica|praticar|estudar|aprender|modo|klaus|claus|'
+          r"let's|lets|speak|talk|switch|back|change|practice|train|learn|want|"
+          r'parla|parlare|parliamo|torna|tornare|torniamo|passiamo|cambia|andiamo|vamo|voglio|allenare|esercitare|studiare)')
+      .hasMatch(t);
+  if (!intent) return null;
+
+  if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
+  if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
+  if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
+  return null;
+}
+
+/// Pedido de MODO TRADUTOR ("a partir de agora traduz para italiano o que eu falar").
+/// Devolve o idioma de destino, ou null se for só uma tradução pontual.
+String? detectTranslatorRequest(String spoken) {
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
+  if (!RegExp(r'tradu|translat').hasMatch(t)) return null;
+  final ongoing = RegExp(r'a partir de agora|daqui (pra|para a|para) frente|modo tradu|tradutor|'
+          r'o que eu (falar|disser|digo|for falando)|tudo (o )?que eu|enquanto eu|'
+          r'from now on|translator|everything i say|what i say|'
+          r"d'ora in poi|da ora|da adesso|traduttore|tutto quello che dico|quello che dico")
+      .hasMatch(t);
+  if (!ongoing) return null;
+  if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
+  if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
+  if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
+  return null;
+}
+
+/// Bandeira na resposta do Klaus = ele percebeu que você quer outro idioma.
+String? detectFlagSwitch(String text) {
+  if (text.contains('🇮🇹')) return 'it';
+  if (text.contains('🇬🇧') || text.contains('🇺🇸')) return 'en';
+  if (text.contains('🇧🇷') || text.contains('🇵🇹')) return 'pt';
   return null;
 }
 
