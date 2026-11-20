@@ -44,6 +44,15 @@ String? detectLanguageSwitch(String spoken) {
     return null;
   }
 
+  // Comando pré-definido, curto: "Klaus, italiano!" / "Klaus, English!" / "Klaus, português!".
+  // O reconhecimento de voz de qualquer agente escreve bem o nome e a língua.
+  final palavras = t.trim().split(' ').where((w) => w.isNotEmpty).length;
+  if (palavras <= 4 && RegExp(r' (klaus|claus|klas|klaas|clause|close|class|clouse|claws)').hasMatch(t)) {
+    if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
+    if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
+    if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
+  }
+
   final intent = RegExp(r' (vamos|bora|quero|queria|vou|fala|falar|fale|falamos|conversa|conversar|'
           r'volta|voltar|volte|voltamos|muda|mudar|mude|troca|trocar|troque|passa|passar|'
           r'treina|treinar|treinare|pratica|praticar|estudar|aprender|modo|klaus|claus|'
