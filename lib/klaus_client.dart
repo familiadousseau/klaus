@@ -110,6 +110,7 @@ class KlausClient extends ChangeNotifier {
     if (s == KlausState.thinking && autoMode && !textMode) {
       _watchdog = Timer(const Duration(seconds: 20), () {
         if (!_disposed && autoMode && state == KlausState.thinking) {
+          markActivity(); // o tempo a pensar não conta como silêncio
           _startListening(auto: true);
         }
       });
@@ -514,6 +515,7 @@ class KlausClient extends ChangeNotifier {
           final ms = 1500 + sentence.length * 90;
           _selfNameUntil = DateTime.now().add(Duration(milliseconds: ms));
         }
+        markActivity(); // enquanto fala, o tempo de sono não corre
         _addChat(false, sentence);
         // Carinha frase a frase: o que ele diz manda; a emoção do servidor só
         // vale para a primeira frase da resposta.
@@ -528,6 +530,9 @@ class KlausClient extends ChangeNotifier {
         // Enquanto acabava de tocar, começou outra fala (p. ex. depois de pôr a rádio):
         // não a corta nem liga o microfone por cima dela.
         if (turn != _ttsTurn) return;
+        // O tempo sem resposta conta a partir de AGORA (fim da fala), não do início:
+        // depois de uma resposta longa ele espera a sua resposta antes de adormecer.
+        markActivity();
         await wake.stop();
         if (_disposed) return;
         _serverEmotion = null;
@@ -656,7 +661,8 @@ class KlausClient extends ChangeNotifier {
     _sleepAfterReply = true;
     _farewellTimer?.cancel();
     _farewellTimer = Timer(const Duration(seconds: 15), () {
-      if (_sleepAfterReply && !sleeping) goToSleep();
+      // Ainda a falar: quando acabar, o fim da fala põe-no a dormir.
+      if (_sleepAfterReply && !sleeping && state != KlausState.speaking) goToSleep();
     });
   }
 
