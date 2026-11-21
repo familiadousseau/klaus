@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'background.dart';
 import 'config.dart';
 import 'klaus_client.dart';
 import 'languages.dart';
@@ -31,6 +32,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final KlausClient klaus = KlausClient();
   final KlausPip pip = KlausPip();
+  final KlausBackground bg = KlausBackground();
+  bool? _wasSleeping;
   final TextEditingController _text = TextEditingController();
   final ScrollController _scroll = ScrollController();
   Timer? _anim;
@@ -49,6 +52,16 @@ class _HomeScreenState extends State<HomeScreen> {
     };
     pip.addListener(_onPip);
     pip.init().then((_) => _syncPip());
+    // Modo bolso: ouvir com o ecrã bloqueado (liga-se depois de o microfone estar autorizado).
+    bg.onStopped = () {
+      if (mounted) setState(() {});
+    };
+    bg.init().then((_) async {
+      await Future.delayed(const Duration(seconds: 4));
+      await bg.start();
+      if (mounted) setState(() {});
+      if (bg.running && await bg.needsFullScreenPermission() && mounted) _askFullScreen();
+    });
     _anim = Timer.periodic(const Duration(milliseconds: 80), (_) {
       if (klaus.state == KlausState.listening || klaus.state == KlausState.speaking) {
         setState(() {});
@@ -66,6 +79,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onChange() {
     if (!mounted) return;
     _syncPip();
+    // Acordou com o ecrã bloqueado → acende e mostra a carinha; voltou a dormir → bloqueio por cima.
+    if (_wasSleeping != klaus.sleeping) {
+      if (_wasSleeping == true && !klaus.sleeping) bg.showOnLock();
+      if (_wasSleeping == false && klaus.sleeping) bg.releaseLock();
+      _wasSleeping = klaus.sleeping;
+    }
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
@@ -80,6 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _anim?.cancel();
     klaus.removeListener(_onChange);
     pip.removeListener(_onPip);
+    bg.stop();
     klaus.dispose();
     _text.dispose();
     _scroll.dispose();
@@ -548,6 +568,28 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _askFullScreen() {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Carinha com o ecrã bloqueado'),
+        content: const Text(
+            'Para o Klaus acender o ecrã e mostrar a carinha quando o chama com o telemóvel bloqueado, '
+            'permita "Notificações em ecrã inteiro" para o Klaus.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Agora não')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(c);
+              bg.openFullScreenSettings();
+            },
+            child: const Text('Abrir definições'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openMenu() {
     showModalBottomSheet(
       context: context,
@@ -563,6 +605,24 @@ class _HomeScreenState extends State<HomeScreen> {
               Navigator.pop(ctx);
               _checkUpdate();
             },
+          ),
+          StatefulBuilder(
+            builder: (c, setLocal) => SwitchListTile(
+              secondary: const Icon(Icons.lock_clock, color: _cyan),
+              title: const Text('Ouvir com o ecrã bloqueado', style: TextStyle(color: Colors.white)),
+              subtitle: Text(
+                  bg.running
+                      ? 'Ligado: diga "Klaus" mesmo com o telemóvel bloqueado'
+                      : 'Desligado',
+                  style: const TextStyle(color: Colors.white54)),
+              value: bg.enabled,
+              activeColor: _cyan,
+              onChanged: (v) async {
+                await bg.setEnabled(v);
+                setLocal(() {});
+                if (mounted) setState(() {});
+              },
+            ),
           ),
           if (pip.supported)
             StatefulBuilder(
