@@ -40,10 +40,10 @@ String? detectShortSwitch(String spoken) {
   final palavras = t.trim().split(' ').where((w) => w.isNotEmpty).length;
   if (palavras <= 4 && RegExp(r' (klaus|claus|klas|klaas|clause|close|class|clouse|claws)').hasMatch(t)) {
     if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
-    if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
-    if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
-  if (RegExp(r'alema(?!nh)|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
-    if (RegExp(r'alema(?!nh)|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
+    if (RegExp(r'ingl|english|englisch').hasMatch(t)) return 'en';
+    if (RegExp(r'italian|italia|italien').hasMatch(t)) return 'it';
+  if (RegExp(r'alema(?!nh)|allema|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
+    if (RegExp(r'alema(?!nh)|allema|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
   }
   return null;
 }
@@ -75,9 +75,9 @@ String? detectLanguageSwitch(String spoken) {
   if (!intent) return null;
 
   if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
-  if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
-  if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
-  if (RegExp(r'alema(?!nh)|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
+  if (RegExp(r'ingl|english|englisch').hasMatch(t)) return 'en';
+  if (RegExp(r'italian|italia|italien').hasMatch(t)) return 'it';
+  if (RegExp(r'alema(?!nh)|allema|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
   return null;
 }
 
@@ -102,11 +102,48 @@ String? detectTranslatorRequest(String spoken) {
           r'ab jetzt|von jetzt an|ubersetzer|alles was ich sage')
       .hasMatch(t);
   if (!ongoing) return null;
-  if (RegExp(r'ingl|english').hasMatch(t)) return 'en';
-  if (RegExp(r'italian|italia').hasMatch(t)) return 'it';
-  if (RegExp(r'alema(?!nh)|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
+  if (RegExp(r'ingl|english|englisch').hasMatch(t)) return 'en';
+  if (RegExp(r'italian|italia|italien').hasMatch(t)) return 'it';
+  if (RegExp(r'alema(?!nh)|allema|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) return 'de';
   if (RegExp(r'portug|portog|portuguese').hasMatch(t)) return 'pt';
   return null;
+}
+
+/// Frase curta dirigida ao Klaus ("Klaus, descansar"): conta mesmo no modo tradutor.
+bool isShortKlausCommand(String spoken) {
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
+  final palavras = t.trim().split(' ').where((w) => w.isNotEmpty).length;
+  return palavras <= 4 &&
+      RegExp(r' (klaus|claus|klas|klaas|klause|clause|close|class|clouse|claws|kloss|glaus) ').hasMatch(t);
+}
+
+/// Comando CURTO do modo tradução, em qualquer agente e em qualquer das 4 línguas:
+///   "Klaus, modo tradução" · "translator mode" · "modalità traduttore" · "Übersetzer"
+///   "Klaus, modo tradução italiano"  (escolhe o agente)
+///   "Klaus, parar tradução" · "stop translation" · "basta tradurre" · "Übersetzung stoppen"
+/// Devolve ('stop', null), ('start', código da língua ou null) ou null.
+(String, String?)? detectTranslatorCommand(String spoken) {
+  final t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
+  final palavras = t.trim().split(' ').where((w) => w.isNotEmpty).length;
+  if (palavras > 7) return null;
+  if (!RegExp(r'tradu|translat|ubersetz|uebersetz|dolmetsch|interpret').hasMatch(t)) return null;
+  final nome = RegExp(r' (klaus|claus|klas|klaas|klause|clause|close|class|clouse|claws|kloss|glaus) ').hasMatch(t);
+  final modo = RegExp(r' (modo|mode|modus|modalita|modalidade) |tradutor|traduttore|translator|ubersetzer|uebersetzer|'
+          r'ubersetzungsmodus|uebersetzungsmodus|dolmetscher|interprete|interpreter')
+      .hasMatch(t);
+  final stop = RegExp(r' (parar|pare|parou|chega|acaba|acabou|fim|sair|sai|desativa|desativar|desliga|desligar|termina|terminar|'
+          r'stop|end|off|basta|smetti|ferma|fine|esci|ende|beenden|beende|aus|halt|stopp|stoppen) |'
+          r' para (de|a|o) (tradu|traduzir)')
+      .hasMatch(t);
+  // "Stop translation", "basta tradurre": curto, mesmo sem o nome.
+  if (stop && (nome || modo || palavras <= 4)) return ('stop', null);
+  if (!nome && !modo) return null;
+  String? alvo;
+  if (RegExp(r'portug|portog|portuguese').hasMatch(t)) alvo = 'pt';
+  if (RegExp(r'ingl|english|englisch').hasMatch(t)) alvo = 'en';
+  if (RegExp(r'italian|italia|italien').hasMatch(t)) alvo = 'it';
+  if (RegExp(r'alema(?!nh)|allema|german(?!y)|deutsch(?!land)|doitsch|tedesc').hasMatch(t)) alvo = 'de';
+  return ('start', alvo);
 }
 
 /// Pedido para DESLIGAR o modo tradutor ("parar tradução", "stop translation", "basta tradurre").

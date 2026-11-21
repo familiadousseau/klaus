@@ -283,6 +283,17 @@ class _HomeScreenState extends State<HomeScreen> {
             }),
           ),
         Text(klaus.status, style: const TextStyle(color: _cyan, fontSize: 16)),
+        // Modo tradutor ligado (diga "Klaus, parar tradução" para sair).
+        if (klaus.translatorOn)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(color: _card, borderRadius: BorderRadius.circular(16)),
+              child: Text('🗣️ Modo tradutor · ${klaus.lang.flag} ⇄ 🇧🇷',
+                  style: const TextStyle(color: Colors.white70)),
+            ),
+          ),
         // Rádio a tocar: toque para parar.
         if (klaus.radio.isPlaying)
           Padding(
