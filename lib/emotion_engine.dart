@@ -1,11 +1,13 @@
 /// Escolhe a carinha do Klaus a partir do que ele diz, frase a frase.
-/// Funciona em português, inglês e italiano. Não depende do servidor.
+/// Funciona em português, inglês, italiano e alemão. Não depende do servidor.
+/// As personalidades mandam começar cada frase com um emoji da emoção: é o sinal mais forte.
 class EmotionEngine {
   int _rotation = 0;
 
   static const _emojiMap = <String, String>{
     '😂': 'laughing', '🤣': 'laughing', '😆': 'laughing',
     '😊': 'happy', '🙂': 'happy', '😀': 'happy', '😃': 'happy', '😄': 'happy',
+    '😁': 'funny', '🤭': 'funny', '😅': 'embarrassed',
     '😜': 'silly', '😝': 'silly', '🤪': 'silly',
     '😢': 'sad', '🙁': 'sad', '☹': 'sad',
     '😭': 'crying',
@@ -29,21 +31,21 @@ class EmotionEngine {
   /// Regras por palavras (texto já sem acentos e em minúsculas; cada palavra-chave
   /// tem de aparecer no início de uma palavra).
   static const _rules = <(String, List<String>)>[
-    ('laughing', ['haha', 'hehe', 'kkk', 'rsrs', 'ahah', 'lol', 'que engracad', 'piada', 'joke', 'funny', 'barzelletta', 'divertente']),
-    ('angry', ['bravo comigo', 'to bravo', 'tou bravo', 'zangado', 'irritad', 'grr', 'hmpf', 'angry', 'annoyed', 'arrabbiat', 'uffa']),
-    ('crying', ['buaa', 'chorar', 'chorando', 'crying', 'piango', 'piangere']),
-    ('sad', ['triste', 'que pena', 'lamento', 'saudade', 'sad', 'sorry', 'too bad', 'mi dispiace', 'peccato']),
-    ('shocked', ['nao acredito', 'meu deus', 'oh my god', 'omg', 'mamma mia', 'incredibile']),
-    ('surprised', ['uau', 'nossa!', 'serio?', 'caramba', 'eita', 'opa!', 'wow', 'really?', 'whoa', 'davvero', 'accidenti']),
-    ('loving', ['adoro', 'amo ', 'gosto muito', 'que lindo', 'love', 'adorabile', 'ti voglio bene', 'amico mio', 'obrigad', 'thank', 'grazie']),
-    ('cool', ['muito bem', 'mandou bem', 'perfeito', 'excelente', 'arrasou', 'great job', 'well done', 'perfect', 'excellent', 'awesome', 'bravissimo', 'perfetto', 'ottimo', 'benissimo']),
-    ('winking', ['quase', 'nao e bem', 'cuidado', 'dica', 'segredo', 'almost', 'not quite', 'quasi', 'attenzione']),
-    ('confused', ['nao entendi', 'como assim', 'hein', 'confus', "don't understand", 'what do you mean', 'non ho capito', 'cosa vuoi dire']),
-    ('embarrassed', ['desculpa', 'ops', 'oops', 'my bad', 'scusa', 'che vergogna', 'vergonha']),
-    ('sleepy', ['com sono', 'cansad', 'boa noite', 'dormir', 'sleepy', 'tired', 'good night', 'stanco', 'buonanotte']),
-    ('delicious', ['comida', 'delicia', 'gostoso', 'pizza', 'cafe', 'food', 'delicious', 'tasty', 'cibo', 'delizioso', 'gelato', 'pasta']),
-    ('confident', ['claro que', 'obvio', 'facil', 'deixa comigo', 'of course', 'easy', 'certo che', 'facile']),
-    ('thinking', ['deixa ver', 'hmm', 'pensar', 'acho que', 'let me think', 'i think', 'vediamo', 'penso che', 'secondo me']),
+    ('laughing', ['haha', 'hehe', 'kkk', 'rsrs', 'ahah', 'lol', 'que engracad', 'piada', 'joke', 'funny', 'barzelletta', 'divertente', 'witzig', 'lustig', 'lachen']),
+    ('angry', ['bravo comigo', 'to bravo', 'tou bravo', 'zangado', 'irritad', 'grr', 'hmpf', 'angry', 'annoyed', 'arrabbiat', 'uffa', 'wutend', 'verargert', 'argerlich']),
+    ('crying', ['buaa', 'chorar', 'chorando', 'crying', 'piango', 'piangere', 'weinen']),
+    ('sad', ['triste', 'que pena', 'lamento', 'saudade', 'sad', 'sorry', 'too bad', 'mi dispiace', 'peccato', 'traurig', 'schade', 'leider', 'tut mir leid']),
+    ('shocked', ['nao acredito', 'meu deus', 'oh my god', 'omg', 'mamma mia', 'incredibile', 'mein gott', 'unglaublich']),
+    ('surprised', ['uau', 'nossa!', 'serio?', 'caramba', 'eita', 'opa!', 'wow', 'really?', 'whoa', 'davvero', 'accidenti', 'wirklich?', 'echt?', 'krass', 'wahnsinn']),
+    ('loving', ['adoro', 'amo ', 'gosto muito', 'que lindo', 'love', 'adorabile', 'ti voglio bene', 'amico mio', 'obrigad', 'thank', 'grazie', 'danke', 'ich liebe', 'ich mag']),
+    ('cool', ['muito bem', 'mandou bem', 'perfeito', 'excelente', 'arrasou', 'great job', 'well done', 'perfect', 'excellent', 'awesome', 'bravissimo', 'perfetto', 'ottimo', 'benissimo', 'sehr gut', 'super', 'toll', 'klasse', 'perfekt', 'ausgezeichnet', 'genau']),
+    ('winking', ['quase', 'nao e bem', 'cuidado', 'dica', 'segredo', 'almost', 'not quite', 'quasi', 'attenzione', 'vorsicht', 'tipp', 'geheimnis']),
+    ('confused', ['nao entendi', 'como assim', 'hein', 'confus', "don't understand", 'what do you mean', 'non ho capito', 'cosa vuoi dire', 'verstehe nicht', 'wie bitte', 'was meinst']),
+    ('embarrassed', ['desculpa', 'ops', 'oops', 'my bad', 'scusa', 'che vergogna', 'vergonha', 'entschuldigung', 'hoppla']),
+    ('sleepy', ['com sono', 'cansad', 'boa noite', 'dormir', 'sleepy', 'tired', 'good night', 'stanco', 'buonanotte', 'mude', 'gute nacht', 'schlafen']),
+    ('delicious', ['comida', 'delicia', 'gostoso', 'pizza', 'cafe', 'food', 'delicious', 'tasty', 'cibo', 'delizioso', 'gelato', 'pasta', 'lecker', 'essen ', 'kaffee', 'kuchen', 'bier']),
+    ('confident', ['claro que', 'obvio', 'facil', 'deixa comigo', 'of course', 'easy', 'certo che', 'facile', 'naturlich', 'klar', 'kein problem', 'einfach']),
+    ('thinking', ['deixa ver', 'hmm', 'pensar', 'acho que', 'let me think', 'i think', 'vediamo', 'penso che', 'secondo me', 'mal sehen', 'ich glaube', 'ich denke', 'lass mich']),
   ];
 
   static String _plain(String s) {
