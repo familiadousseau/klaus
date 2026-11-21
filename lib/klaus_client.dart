@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,6 +21,7 @@ enum KlausState { starting, needsActivation, connecting, idle, listening, thinki
 class ChatLine {
   final bool fromUser;
   final String text;
+  final DateTime at = DateTime.now();
   ChatLine(this.fromUser, this.text);
 }
 
@@ -77,6 +79,25 @@ class KlausClient extends ChangeNotifier {
   String? _serverEmotion;
   Timer? _retry;
 
+  // ---- Ordens que o próprio app manda ao agente (texto "detect") ----
+  // O servidor devolve esse texto como se a pessoa o tivesse dito (stt). Não pode ser lido
+  // como comando: a ordem do modo tradutor tem "modo tradutor" + "italiano" e voltaria a
+  // ligá-lo, religando o agente sem parar.
+  String? _kickoff;
+  DateTime _kickoffAt = DateTime(2000);
+  String? _typed; // texto escrito no modo escrito (já está no histórico)
+
+  // ---- Fala ----
+  int _ttsTurn = 0; // muda a cada fala nova, para o fim de uma não cortar a seguinte
+
+  /// Vezes em que o som faltou a meio de uma fala (aparece no menu).
+  int get audioGaps => speaker.gaps;
+
+  // ---- Contexto entre sonos ----
+  static const _recapMaxAge = Duration(hours: 4);
+  String? _recap; // resumo da conversa antes de adormecer
+  DateTime _recapAt = DateTime(2000);
+
   double get micLevel => mic.level;
   double get speakerLevel => speaker.level;
 
@@ -94,6 +115,83 @@ class KlausClient extends ChangeNotifier {
       });
     }
     if (!_disposed) notifyListeners();
+  }
+
+  static String _norm(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9à-ÿ]+'), '');
+
+  /// Manda ao agente um texto como se fosse dito (ordem do app, cumprimento, aula...).
+  void _sendDetect(String text, {bool own = true}) {
+    if (own) {
+      _kickoff = text;
+      _kickoffAt = DateTime.now();
+    }
+    _sendJson({'session_id': _sessionId, 'type': 'listen', 'state': 'detect', 'text': text});
+  }
+
+  /// O texto reconhecido é só o eco de uma ordem do app?
+  bool _isKickoffEcho(String said) {
+    final k = _kickoff;
+    if (k == null || DateTime.now().difference(_kickoffAt) > const Duration(seconds: 30)) return false;
+    final a = _norm(said), b = _norm(k);
+    if (a.isEmpty || b.isEmpty) return false;
+    final n = math.min(40, math.min(a.length, b.length));
+    final echo = a == b || (n >= 12 && a.substring(0, n) == b.substring(0, n));
+    if (echo) _kickoff = null;
+    return echo;
+  }
+
+  static final _emojiRe = RegExp(
+      r'[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{1F1E6}-\u{1F1FF}]',
+      unicode: true);
+
+  /// Resumo das últimas falas (das últimas horas), para o Klaus não perder o fio ao acordar.
+  String? _buildRecap() {
+    final since = DateTime.now().subtract(_recapMaxAge);
+    final lines = <String>[];
+    var total = 0;
+    for (final l in chat.reversed) {
+      if (l.at.isBefore(since)) break;
+      var s = l.text.replaceAll(_emojiRe, '').replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (s.length < 2) continue;
+      if (s.length > 240) s = '${s.substring(0, 240)}…';
+      final line = '${l.fromUser ? 'Eu' : 'Você'}: $s';
+      if (lines.length >= 16 || total + line.length > 1400) break;
+      lines.insert(0, line);
+      total += line.length;
+    }
+    return lines.isEmpty ? null : lines.join('\n');
+  }
+
+  Future<void> _saveRecap() async {
+    final r = _buildRecap();
+    if (r == null) return;
+    _recap = r;
+    _recapAt = DateTime.now();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('klaus_recap', r);
+      await prefs.setInt('klaus_recap_at', _recapAt.millisecondsSinceEpoch);
+    } catch (_) {}
+  }
+
+  Future<void> _loadRecap() async {
+    if (_recap != null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _recap = prefs.getString('klaus_recap');
+      _recapAt = DateTime.fromMillisecondsSinceEpoch(prefs.getInt('klaus_recap_at') ?? 0);
+    } catch (_) {}
+  }
+
+  /// Texto mandado ao acordar: o nome e, se houve conversa há pouco, o fio da meada.
+  String _wakeText() {
+    final r = _recap;
+    if (r == null || DateTime.now().difference(_recapAt) > _recapMaxAge) return 'Klaus';
+    return 'Klaus! (Você acabou de acordar. Antes de dormir, a nossa conversa foi esta:\n$r\n'
+        'É a mesma conversa: se eu voltar a esse assunto ou perguntar algo que foi dito, '
+        'responda com base nisto. Agora só me cumprimente com uma frase curta, '
+        'sem repetir nem comentar este resumo.)';
   }
 
   void _addChat(bool user, String text) {
@@ -132,6 +230,7 @@ class KlausClient extends ChangeNotifier {
       }
       final prefs = await SharedPreferences.getInstance();
       lang = langByCode(prefs.getString('klaus_lang') ?? 'pt');
+      await _loadRecap();
       _gen++;
       identity = await DeviceIdentity.load(lang.prefix);
       await _runOta();
@@ -318,8 +417,20 @@ class KlausClient extends ChangeNotifier {
         break;
       case 'stt':
         final said = data['text']?.toString() ?? '';
+        // Eco de uma ordem do próprio app: não é a pessoa a falar, não é comando.
+        if (_isKickoffEcho(said)) {
+          _set(KlausState.thinking, 'A pensar...');
+          emotion = 'thinking';
+          notifyListeners();
+          break;
+        }
         if (said.trim().length > 1) markActivity(); // frase reconhecida = conversa real
-        _addChat(true, said);
+        // Texto escrito: já está no histórico (o servidor só o devolve).
+        if (_typed != null && _norm(said) == _norm(_typed!)) {
+          _typed = null;
+        } else {
+          _addChat(true, said);
+        }
         // MODO TRADUÇÃO: o app reconhece o comando e manda ele próprio a ordem completa ao agente.
         final cmd = detectTranslatorCommand(said);
         final stopTranslator = cmd?.$1 == 'stop' || detectTranslatorStop(said);
@@ -383,6 +494,7 @@ class KlausClient extends ChangeNotifier {
   Future<void> _onTts(Map<String, dynamic> data) async {
     switch (data['state']) {
       case 'start':
+        _ttsTurn++;
         markActivity();
         if (autoMode || textMode) await mic.stop();
         if (!textMode) {
@@ -410,7 +522,12 @@ class KlausClient extends ChangeNotifier {
         notifyListeners();
         break;
       case 'stop':
+        final turn = _ttsTurn;
+        speaker.endOfStream();
         await speaker.drain();
+        // Enquanto acabava de tocar, começou outra fala (p. ex. depois de pôr a rádio):
+        // não a corta nem liga o microfone por cima dela.
+        if (turn != _ttsTurn) return;
         await wake.stop();
         if (_disposed) return;
         _serverEmotion = null;
@@ -512,12 +629,8 @@ class KlausClient extends ChangeNotifier {
     if (t.isEmpty || _ws == null) return;
     if (state == KlausState.speaking) await abort();
     _addChat(true, t);
-    _sendJson({
-      'session_id': _sessionId,
-      'type': 'listen',
-      'state': 'detect',
-      'text': t,
-    });
+    _typed = t;
+    _sendDetect(t, own: false);
     emotion = 'thinking';
     _set(KlausState.thinking, 'A pensar...');
   }
@@ -589,9 +702,10 @@ class KlausClient extends ChangeNotifier {
       _sendJson({'session_id': _sessionId, 'type': 'listen', 'state': 'stop'});
       await mic.stop();
     }
-    await speaker.interrupt();
+    await speaker.release(); // a dormir não precisa do altifalante (volta ao acordar)
     await wake.stop();
     await _closeWs();
+    unawaited(_saveRecap());
     emotion = 'sleeping';
     _set(KlausState.idle, 'A dormir... chame "Klaus"');
     try {
@@ -614,12 +728,8 @@ class KlausClient extends ChangeNotifier {
     await connect();
     if (_ws != null && !textMode) {
       // Igual a um aparelho XiaoZhi que ouviu a palavra de ativação: o servidor cumprimenta.
-      _sendJson({
-        'session_id': _sessionId,
-        'type': 'listen',
-        'state': 'detect',
-        'text': 'Klaus',
-      });
+      // Se houve conversa há pouco, vai junto o resumo, para continuar o mesmo assunto.
+      _sendDetect(_wakeText());
     }
   }
 
@@ -701,21 +811,16 @@ class KlausClient extends ChangeNotifier {
       await _runOta();
       if (_ws != null && !textMode) {
         // Começa logo a aula (ou o regresso) no idioma novo.
-        _sendJson({
-          'session_id': _sessionId,
-          'type': 'listen',
-          'state': 'detect',
-          'text': kickoff != null
-              ? kickoff
-              : translator
-              ? _translatorInstruction(lang.code)
-              : lang.code == 'pt'
-                  ? 'Klaus, voltei para o português!'
-                  // Só pede aula se a pessoa pediu treino; senão é conversa normal.
-                  : lesson
-                      ? 'Oi Klaus! Vamos treinar línguas. Começa a aula.'
-                      : 'Oi Klaus! Tudo bem?',
-        });
+        _sendDetect(kickoff != null
+            ? kickoff
+            : translator
+                ? _translatorInstruction(lang.code)
+                : lang.code == 'pt'
+                    ? 'Klaus, voltei para o português!'
+                    // Só pede aula se a pessoa pediu treino; senão é conversa normal.
+                    : lesson
+                        ? 'Oi Klaus! Vamos treinar línguas. Começa a aula.'
+                        : 'Oi Klaus! Tudo bem?');
       }
     } catch (e) {
       _fail('Não consegui mudar de idioma: $e');

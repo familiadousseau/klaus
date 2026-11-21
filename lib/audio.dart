@@ -149,6 +149,9 @@ class MicCapture {
 
 /// Altifalante: descodifica Opus e toca PCM com um pequeno buffer controlado em Dart,
 /// para conseguir interromper na hora e saber quando a fala terminou.
+///
+/// Almofada contra falhas de rede: antes de começar (e depois de o áudio faltar a meio)
+/// junta um pouco de som. Se a rede falha, a almofada cresce sozinha; se corre bem, encolhe.
 class SpeakerPlayback {
   FlutterPcmPlayer? _player;
   SimpleOpusDecoder? _decoder;
@@ -157,7 +160,18 @@ class SpeakerPlayback {
   Timer? _pump;
   final Stopwatch _clock = Stopwatch();
   double _fedMs = 0; // milissegundos de áudio já entregues ao AudioTrack
+  double _queuedMs = 0; // milissegundos de áudio à espera na fila
   bool _ready = false;
+
+  static const _basePrerollMs = 240;
+  static const _maxPrerollMs = 720;
+  int _prerollMs = _basePrerollMs;
+  bool _flowing = false; // já passou a almofada e está a tocar
+  bool _flush = false; // o servidor já mandou tudo desta fala: toca o que houver
+  bool _gapThisTurn = false;
+
+  /// Vezes em que o som faltou a meio de uma fala (rede lenta ou servidor atrasado).
+  int gaps = 0;
 
   /// Nível do som (0..1) para a boca "mexer".
   double level = 0;
@@ -191,21 +205,38 @@ class SpeakerPlayback {
     if (!_ready || _decoder == null) return;
     try {
       final pcm = _decoder!.decode(input: opus);
-      _queue.add(Uint8List.view(pcm.buffer, pcm.offsetInBytes, pcm.lengthInBytes));
+      final chunk = Uint8List.view(pcm.buffer, pcm.offsetInBytes, pcm.lengthInBytes);
+      _queue.add(chunk);
+      _queuedMs += _ms(chunk);
     } catch (_) {}
+    _flush = false; // chegou som novo: ainda não acabou
     _pump ??= Timer.periodic(const Duration(milliseconds: 20), (_) => _tick());
   }
 
+  /// O servidor terminou de mandar esta fala: toca o resto sem esperar pela almofada.
+  void endOfStream() {
+    _flush = true;
+    if (!_gapThisTurn && _prerollMs > _basePrerollMs) {
+      _prerollMs = math.max(_basePrerollMs, _prerollMs - 60); // rede boa: almofada encolhe
+    }
+    _gapThisTurn = false;
+  }
+
+  double _ms(Uint8List chunk) => chunk.lengthInBytes / 2 / _sampleRate * 1000;
+
   void _tick() {
     if (!_ready || _player == null) return;
-    if (!_clock.isRunning) {
-      _clock
-        ..reset()
-        ..start();
-      _fedMs = 0;
+    final playedOut = !_clock.isRunning || _fedMs <= _clock.elapsedMilliseconds;
+    if (!_flowing) {
+      if (_queue.isEmpty) {
+        if (playedOut) _stopPump(); // nada para tocar: o relógio pára (poupa bateria)
+        return;
+      }
+      if (_queuedMs < _prerollMs && !_flush) return; // a juntar a almofada
+      _flowing = true;
     }
     // Se o buffer esvaziou, recomeça a contagem.
-    if (_fedMs < _clock.elapsedMilliseconds) {
+    if (playedOut) {
       _clock
         ..reset()
         ..start();
@@ -214,7 +245,8 @@ class SpeakerPlayback {
     // Mantém ~250 ms de áudio adiantado no AudioTrack.
     while (_queue.isNotEmpty && _fedMs - _clock.elapsedMilliseconds < 250) {
       final chunk = _queue.removeFirst();
-      final ms = chunk.lengthInBytes / 2 / _sampleRate * 1000;
+      final ms = _ms(chunk);
+      _queuedMs -= ms;
       _fedMs += ms;
       var peak = 0;
       final s16 = chunk.buffer.asInt16List(chunk.offsetInBytes, chunk.lengthInBytes ~/ 2);
@@ -225,9 +257,29 @@ class SpeakerPlayback {
       level = peak / 32768.0;
       _player!.feed(chunk);
     }
-    if (_queue.isEmpty && _fedMs <= _clock.elapsedMilliseconds) {
-      level = 0;
+    if (_queue.isEmpty) {
+      _queuedMs = 0;
+      if (_fedMs <= _clock.elapsedMilliseconds) {
+        level = 0;
+        _flowing = false;
+        if (!_flush) {
+          // O som acabou antes de o servidor dizer que terminou: falha a meio da fala.
+          gaps++;
+          _gapThisTurn = true;
+          _prerollMs = math.min(_maxPrerollMs, _prerollMs + 120);
+        }
+      }
     }
+  }
+
+  void _stopPump() {
+    _pump?.cancel();
+    _pump = null;
+    _clock
+      ..stop()
+      ..reset();
+    _fedMs = 0;
+    level = 0;
   }
 
   /// true enquanto ainda há som por tocar.
@@ -236,6 +288,7 @@ class SpeakerPlayback {
 
   /// Espera até acabar de tocar o que está em fila.
   Future<void> drain() async {
+    _flush = true;
     var guard = 0;
     while (isBusy && guard < 600) {
       await Future.delayed(const Duration(milliseconds: 50));
@@ -255,13 +308,11 @@ class SpeakerPlayback {
   }
 
   Future<void> release() async {
-    _pump?.cancel();
-    _pump = null;
+    _stopPump();
     _queue.clear();
-    _clock
-      ..stop()
-      ..reset();
-    _fedMs = 0;
+    _queuedMs = 0;
+    _flowing = false;
+    _flush = false;
     try {
       await _player?.release();
     } catch (_) {}

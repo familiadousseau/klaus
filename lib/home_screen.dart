@@ -37,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _text = TextEditingController();
   final ScrollController _scroll = ScrollController();
   Timer? _anim;
+  int _lastBounce = 100;
   bool _showText = false;
 
   @override
@@ -62,8 +63,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() {});
       if (bg.running && await bg.needsFullScreenPermission() && mounted) _askFullScreen();
     });
+    // A carinha "mexe" com o som; só redesenha quando o movimento muda mesmo.
     _anim = Timer.periodic(const Duration(milliseconds: 80), (_) {
-      if (klaus.state == KlausState.listening || klaus.state == KlausState.speaking) {
+      final b = (_bounce() * 100).round();
+      if (b != _lastBounce && mounted) {
+        _lastBounce = b;
         setState(() {});
       }
     });
@@ -235,15 +239,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  double _bounce() {
+    if (klaus.state == KlausState.speaking) return 1.0 + klaus.speakerLevel * 0.08;
+    if (klaus.state == KlausState.listening && klaus.mic.voiceActive) return 1.0 + klaus.micLevel * 0.05;
+    return 1.0;
+  }
+
   Widget _face({double size = 260, bool square = false}) {
     // square: versão quadrada (cantos preenchidos) para a janelinha flutuante.
     final dir = square ? 'assets/emojis_pip' : 'assets/emojis';
     final name = _emotions.contains(klaus.emotion) ? klaus.emotion : 'neutral';
-    double bounce = 1.0;
-    if (klaus.state == KlausState.speaking) bounce = 1.0 + klaus.speakerLevel * 0.08;
-    if (klaus.state == KlausState.listening && klaus.mic.voiceActive) bounce = 1.0 + klaus.micLevel * 0.05;
     return AnimatedScale(
-      scale: bounce,
+      scale: _bounce(),
       duration: const Duration(milliseconds: 80),
       child: Image.asset(
         '$dir/$name.gif',
@@ -610,7 +617,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ListTile(
             leading: const Icon(Icons.system_update, color: _cyan),
             title: const Text('Procurar atualização', style: TextStyle(color: Colors.white)),
-            subtitle: Text('Versão instalada: ${KlausConfig.buildNumber} · ouvido: ${klaus.wake.engine}',
+            subtitle: Text(
+                'Versão instalada: ${KlausConfig.buildNumber} · ouvido: ${klaus.wake.engine}'
+                ' · falhas de som (rede): ${klaus.audioGaps}',
                 style: const TextStyle(color: Colors.white54)),
             onTap: () {
               Navigator.pop(ctx);
