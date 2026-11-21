@@ -144,8 +144,32 @@ bool detectFarewell(String spoken) {
     ' ruh dich aus', ' ruhe dich aus', ' ausruhen', ' geh schlafen', ' schlaf gut', ' lebewohl', ' leb wohl',
     ' adieu', ' bis bald',
   ];
+  // Perguntas sobre palavras ("como se diz descansar?", "what does bye mean?") não são despedidas.
+  if (RegExp(r'como se diz|como e que se diz|o que significa|que quer dizer|how do you say|what does|what is the|'
+          r'come si dice|cosa vuol|cosa significa|wie sagt man|was bedeutet|tradu|translat|ubersetz')
+      .hasMatch(t)) {
+    return false;
+  }
   if (words.any(t.contains)) return true;
-  // Ordem curta: "Klaus, rest!", "dorme", "schlaf!", "dormi"
   final palavras = t.trim().split(' ').where((w) => w.isNotEmpty).length;
+  final nomeRe = RegExp(r' (klaus|claus|klas|klaas|klause|clause|close|class|clouse|claws|kloss|glaus) ');
+  final nomeM = nomeRe.firstMatch(t);
+  final nome = nomeM != null;
+  // FRASE FIXA, em qualquer agente: "Klaus, descansar".
+  // Vê-se pelo som da palavra logo a seguir ao nome, porque o reconhecedor inglês/italiano/alemão
+  // pode escrever "this cancer", "the scansar", "des kansar"…
+  if (nomeM != null && palavras <= 4) {
+    final som = t
+        .substring(nomeM.end)
+        .replaceAll(' ', '')
+        .replaceAll(RegExp('c(?=[eiy])'), 's') // "cancer" soa "kanser"
+        .replaceAll(RegExp('[cq]'), 'k')
+        .replaceAll('z', 's')
+        .replaceAll('ss', 's');
+    if (RegExp(r'^(d|th|t)?[aeiouy]*s?kan+s[aeiou]').hasMatch(som)) return true;
+  }
+  // "Boa noite, Klaus" com o nome mal escrito ("Claus", "Close"…)
+  if (nome && t.contains(' boa noite ')) return true;
+  // Ordem curta: "Klaus, rest!", "dorme", "schlaf!", "dormi"
   return palavras <= 3 && RegExp(r' (rest|sleep|dorme|dormir|dormi|schlaf|schlafen) ').hasMatch(t);
 }
