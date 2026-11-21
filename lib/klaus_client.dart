@@ -87,6 +87,12 @@ class KlausClient extends ChangeNotifier {
   DateTime _kickoffAt = DateTime(2000);
   String? _typed; // texto escrito no modo escrito (já está no histórico)
 
+  // ---- Freio ("Klaus, pare!") ----
+  DateTime _bargeAt = DateTime(2000); // última vez que "Klaus" o interrompeu a falar
+  DateTime _quietUntil = DateTime(2000); // ignora a resposta que o servidor ainda mande
+
+  bool get _quiet => DateTime.now().isBefore(_quietUntil);
+
   // ---- Fala ----
   int _ttsTurn = 0; // muda a cada fala nova, para o fim de uma não cortar a seguinte
 
@@ -397,6 +403,7 @@ class KlausClient extends ChangeNotifier {
   Future<void> _onMessage(dynamic msg, Completer<bool> helloDone) async {
     if (msg is List<int>) {
       if (textMode && !textModeVoice) return; // modo escrito sem som
+      if (_quiet) return; // acabou de mandar calar: deita fora o resto da resposta
       speaker.addOpus(Uint8List.fromList(msg));
       return;
     }
@@ -432,6 +439,15 @@ class KlausClient extends ChangeNotifier {
         } else {
           _addChat(true, said);
         }
+        // FREIO: "Klaus, pare!" / "stop" / "basta" / "hör auf" → cala-se e fica à espera.
+        // No modo tradutor só conta com o nome ou logo depois de o interromper com "Klaus"
+        // (senão o "pare" da conversa é para traduzir).
+        final justBarged = DateTime.now().difference(_bargeAt) < const Duration(seconds: 8);
+        if (detectStopCommand(said) && (!_translatorOn || justBarged || isShortKlausCommand(said))) {
+          await _hush(stopRadio: !justBarged && state != KlausState.speaking);
+          break;
+        }
+        _quietUntil = DateTime(2000); // falou outra coisa: a resposta já conta
         // MODO TRADUÇÃO: o app reconhece o comando e manda ele próprio a ordem completa ao agente.
         final cmd = detectTranslatorCommand(said);
         final stopTranslator = cmd?.$1 == 'stop' || detectTranslatorStop(said);
@@ -469,6 +485,7 @@ class KlausClient extends ChangeNotifier {
         notifyListeners();
         break;
       case 'llm':
+        if (_quiet) break;
         // 👋 = a IA percebeu que é uma despedida (combinado na personalidade).
         if ((data['text']?.toString() ?? '').contains('👋')) _armFarewell();
         _checkFlag(data['text']?.toString() ?? '');
@@ -493,6 +510,11 @@ class KlausClient extends ChangeNotifier {
   }
 
   Future<void> _onTts(Map<String, dynamic> data) async {
+    if (_quiet) {
+      // Resposta ao "pare" que o servidor já tinha começado: cancela de novo e não toca.
+      if (data['state'] == 'start') _sendJson({'session_id': _sessionId, 'type': 'abort'});
+      return;
+    }
     switch (data['state']) {
       case 'start':
         _ttsTurn++;
@@ -640,10 +662,35 @@ class KlausClient extends ChangeNotifier {
     _set(KlausState.thinking, 'A pensar...');
   }
 
+  /// Freio: cala-se já, cancela a resposta que vinha e fica a ouvir em silêncio.
+  /// Se não estava a falar e a rádio está a tocar, "pare" desliga a rádio.
+  Future<void> _hush({bool stopRadio = false}) async {
+    _quietUntil = DateTime.now().add(const Duration(seconds: 5));
+    _sleepAfterReply = false;
+    _farewellTimer?.cancel();
+    _pendingSwitch = null;
+    markActivity();
+    await wake.stop();
+    _sendJson({'session_id': _sessionId, 'type': 'abort'});
+    await speaker.interrupt();
+    if (stopRadio && radio.isPlaying) await radio.stop();
+    if (textMode) {
+      _set(KlausState.idle, 'Modo escrito');
+    } else if (autoMode) {
+      await _startListening(auto: true);
+    } else {
+      _set(KlausState.idle, 'Pronto! Toque para falar');
+    }
+    emotion = 'neutral';
+    status = 'Parei. Fale quando quiser';
+    notifyListeners();
+  }
+
   /// "Klaus" ouvido enquanto ele falava: interrompe e ouve.
   void _bargeIn() {
     if (sleeping) return;
     if (DateTime.now().isBefore(_selfNameUntil)) return; // foi ele a dizer o nome
+    _bargeAt = DateTime.now();
     wake.stop();
     markActivity();
     _sleepAfterReply = false;

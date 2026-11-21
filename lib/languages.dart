@@ -156,6 +156,35 @@ bool detectTranslatorStop(String spoken) {
       .hasMatch(t);
 }
 
+/// FREIO: "Klaus, pare!" em qualquer das 4 línguas. O Klaus cala-se já e fica à espera,
+/// sem responder. A frase tem de ser só a ordem (o nome e "por favor" são opcionais),
+/// para "para quê?" ou "chega aqui" não contarem.
+const _stopPhrases = {
+  // português
+  'pare', 'para', 'parar', 'para ai', 'pare ai', 'pode parar', 'chega', 'basta', 'silencio',
+  'cala', 'cala te', 'cala se', 'cala a boca', 'quieto', 'fica quieto', 'espera', 'espere', 'espera ai', 'espere ai',
+  'para de falar', 'pare de falar', 'chega de falar', 'para com isso', 'pare com isso',
+  // inglês
+  'stop', 'stop it', 'stop talking', 'quiet', 'be quiet', 'enough', "that's enough", 'thats enough',
+  'shut up', 'hold on', 'wait', 'wait a second', 'wait a moment',
+  // italiano
+  'basta cosi', 'fermati', 'ferma', 'zitto', 'stai zitto', 'silenzio', 'aspetta', 'smettila', 'smetti',
+  'smetti di parlare',
+  // alemão
+  'stopp', 'halt', 'hor auf', 'hoer auf', 'horauf', 'ruhe', 'genug', 'still', 'sei still', 'warte',
+  'aufhoren', 'aufhoeren', 'hor auf zu reden', 'halt stopp',
+};
+
+bool detectStopCommand(String spoken) {
+  var t = ' ${_plain(spoken).replaceAll(RegExp(r"[^a-z' ]+"), ' ').replaceAll(RegExp(r' +'), ' ')} ';
+  t = t.replaceAll(
+      RegExp(r' (klaus|claus|klas|klaas|klause|clause|close|class|clouse|claws|kloss|glaus)(?= )'), ' ');
+  t = t.replaceAll(
+      RegExp(r' (por favor|please|bitte|per favore|ok|okay|oi|ei|hey|agora|now|jetzt|adesso|ora|ja)(?= )'), ' ');
+  t = t.replaceAll(RegExp(r' +'), ' ').trim();
+  return _stopPhrases.contains(t);
+}
+
 /// Bandeira na resposta do Klaus = ele percebeu que você quer outro idioma.
 String? detectFlagSwitch(String text) {
   if (text.contains('🇮🇹')) return 'it';
